@@ -10,8 +10,8 @@ FIFO="$4"
 CACHE="$5"
 
 # javascript files and templates
-FILES="/var/lib/dsb"
-TEMPLATES="$FILES/Templates"
+LIBFILES="/var/lib/dsb"
+TEMPLATES="$LIBFILES/Templates"
 
 # time in seconds
 DSB_RELOAD_TIME="2"
@@ -20,7 +20,7 @@ PDF_QUALITY="80"
 exec 1>>$LOG
 exec 2>&1
 
-# fifo allso on fd 23
+# fifo, alles @ fd 23
 exec 23<>${FIFO}
 FIFO_FD=23
 
@@ -267,6 +267,8 @@ read_mediafiles() {
   CacheDir="$CACHE/$Section"
   mkdir -p "$CacheDir"
 
+  # xxx - ganz anders hier...
+
   # cleanup old one, if there
   echo -n > "$WEB/if_$Id.txt"
   rm -rf "$WEB/if_$Id"
@@ -298,15 +300,8 @@ read_mediafiles() {
 }
 
 # Inhalt eines Templates lesen und zurück geben
-# Reihenfolge des einlesens:
-# 1) SystemTemplate @ /var/lib/dsb
-# 2) SMB Template
-# 3) User Template
 read_template_file() {
   File="$1"
-
-  # User Template
-  UserDir="$SMB/${SECTIONS[$Id]}"
 
   # log "find \"$UserDir\" -iname \"$File\""
   find "$UserDir" -iname "$File" | while read f; do
@@ -314,23 +309,47 @@ read_template_file() {
   done
 }
 
-# "Ticker" / IO
-generate_iframe_ticker() {
-  STYLE=`read_template_file "#Style.txt"`
+# -> setzt diese Variable: $LAYOUT
+read_template_files() {
+  # User Template
+  UserDir="$SMB/${SECTIONS[$Id]}"
+
   LAYOUT=`read_template_file "#Layout.txt"`
-  TICKER=`read_template_file "#Ticker.txt"`
-  OPTIONEN=`read_template_file "#Optionen.txt"`
+  FILES=`echo "$LAYOUT" | grep -E '%\w*%'| cut -d% -f2`
 
-  LAYOUT=${LAYOUT/'%STYLE%'/"$STYLE"}
-  LAYOUT=${LAYOUT/'%OPTIONEN%'/"$OPTIONEN"}
-  T=""
-  while read -r tline; do
-    T="$T<li>$tline</li>"
-  done <<< "$TICKER"
-  LAYOUT=${LAYOUT/'%TICKER%'/"$T"}
+  # alle %xyz% platzhalter ersetzen
+  for x in $FILES; do
+    # Ticker und Mediafiles sind anders!
+    test "$x" = "TICKER" && continue
+    test "$x" = "MEDIAFILES" && continue
+    test "$x" = "IFRAME_STYLES" && continue
+    test "$x" = "IFRAME_LINKS" && continue
+    Content=`read_template_file "#$x"`
+    LAYOUT=${LAYOUT/"%$x%"/"$Content"}
+  done
 
+  # log "find \"$UserDir\" -iname \"$File\""
+  find "$UserDir" -iname "$File" | while read f; do
+    cat "$f"
+  done
+
+  # reload kann überall drinnen sein
   RELOAD="dsb_checkreload(\"if_$Id.html.md5\", $DSB_RELOAD_TIME);"
   LAYOUT=${LAYOUT/'%DSB_RELOAD%'/"$RELOAD"}
+}
+
+# "Ticker" / IO
+generate_iframe_ticker() {
+  read_template_files
+
+  # set up ticker <li's>
+  if [ ! -z "$TICKER" ]; then
+    T=""
+    while read -r tline; do
+      T="$T<li>$tline</li>"
+    done <<< "$TICKER"
+    LAYOUT=${LAYOUT/'%TICKER%'/"$T"}
+  fi
   echo "$LAYOUT" > "$WEB/if_$Id.html"
 }
 
@@ -339,80 +358,37 @@ generate_iframe_ticker() {
 # - alle bilder darin werden angezeigt
 # - optionen via.?
 generate_iframe_slideshow() {
-  STYLE=`read_template_file "#Style.txt"`
-  LAYOUT=`read_template_file "#Layout.txt"`
-  OPTIONEN=`read_template_file "#Optionen.txt"`
-
-  LAYOUT=${LAYOUT/'%STYLE%'/"$STYLE"}
-  LAYOUT=${LAYOUT/'%OPTIONEN%'/"$OPTIONEN"}
+  read_template_files
 
   echo -n > "$WEB/if_$Id.media"
   read_mediafiles
   MEDIAFILES=`cat "$WEB/if_$Id.media"`
   LAYOUT=${LAYOUT/'%MEDIAFILES%'/"$MEDIAFILES"}
 
-  RELOAD="dsb_checkreload(\"if_$Id.html.md5\", $DSB_RELOAD_TIME);"
-  LAYOUT=${LAYOUT/'%DSB_RELOAD%'/"$RELOAD"}
   echo "$LAYOUT" > "$WEB/if_$Id.html"
 }
 
 # "Uhr" / IO
 generate_iframe_uhr() {
-  STYLE=`read_template_file "#Style.txt"`
-  LAYOUT=`read_template_file "#Layout.txt"`
-  OPTIONEN=`read_template_file "#Optionen.txt"`
-
-  LAYOUT=${LAYOUT/'%STYLE%'/"$STYLE"}
-  LAYOUT=${LAYOUT/'%OPTIONEN%'/"$OPTIONEN"}
-
-  RELOAD="dsb_checkreload(\"if_$Id.html.md5\", $DSB_RELOAD_TIME);"
-  LAYOUT=${LAYOUT/'%DSB_RELOAD%'/"$RELOAD"}
+  read_template_files
   echo "$LAYOUT" > "$WEB/if_$Id.html"
 }
 
 # "Webseite" / IO
 generate_iframe_webseite() {
-  STYLE=`read_template_file "#Style.txt"`
-  LAYOUT=`read_template_file "#Layout.txt"`
-  OPTIONEN=`read_template_file "#Optionen.txt"`
-
-  LAYOUT=${LAYOUT/'%STYLE%'/"$STYLE"}
-  LAYOUT=${LAYOUT/'%OPTIONEN%'/"$OPTIONEN"}
-
-  RELOAD="dsb_checkreload(\"if_$Id.html.md5\", $DSB_RELOAD_TIME);"
-  LAYOUT=${LAYOUT/'%DSB_RELOAD%'/"$RELOAD"}
+  read_template_files
   echo "$LAYOUT" > "$WEB/if_$Id.html"
 }
 
 # "Newsfeed" / IO
 generate_iframe_newsfeed() {
-  STYLE=`read_template_file "#Style.txt"`
-  LAYOUT=`read_template_file "#Layout.txt"`
-  OPTIONEN=`read_template_file "#Optionen.txt"`
-
-  LAYOUT=${LAYOUT/'%STYLE%'/"$STYLE"}
-  LAYOUT=${LAYOUT/'%OPTIONEN%'/"$OPTIONEN"}
-
-  RELOAD="dsb_checkreload(\"if_$Id.html.md5\", $DSB_RELOAD_TIME);"
-  LAYOUT=${LAYOUT/'%DSB_RELOAD%'/"$RELOAD"}
+  read_template_files
   echo "$LAYOUT" > "$WEB/if_$Id.html"
 }
 
 # "Wetter" / IO
 generate_iframe_wetter() {
-  STYLE=`read_template_file "#Style.txt"`
-  LAYOUT=`read_template_file "#Layout.txt"`
-  BUTTON1=`read_template_file "#Button1.txt"`
-  BUTTON2=`read_template_file "#Button2.txt"`
-  BUTTON3=`read_template_file "#Button3.txt"`
-
-  LAYOUT=${LAYOUT/'%STYLE%'/"$STYLE"}
-  LAYOUT=${LAYOUT/'%BUTTON1%'/"$BUTTON1"}
-  LAYOUT=${LAYOUT/'%BUTTON2%'/"$BUTTON2"}
-  LAYOUT=${LAYOUT/'%BUTTON3%'/"$BUTTON3"}
-
-  RELOAD="dsb_checkreload(\"if_$Id.html.md5\", $DSB_RELOAD_TIME);"
-  LAYOUT=${LAYOUT/'%DSB_RELOAD%'/"$RELOAD"}
+  read_template_files
   echo "$LAYOUT" > "$WEB/if_$Id.html"
 }
 
@@ -420,25 +396,18 @@ generate_iframe_wetter() {
 generate_index() {
   log "Erstelle Index($Id), Type=$Type, Section=$Section"
 
-  STYLE=`read_template_file "#Style.txt"`
-  LAYOUT=`read_template_file "#Layout.txt"`
-  OPTIONEN=`read_template_file "#Optionen.txt"`
+  read_template_files
+
   IFRAME_STYLES=`cat "$CACHE/iframe-styles"`
   IFRAME_LINKS=`cat "$CACHE/iframe-links"`
-
-  LAYOUT=${LAYOUT/'%STYLE%'/"$STYLE"}
-  LAYOUT=${LAYOUT/'%OPTIONEN%'/"$OPTIONEN"}
   LAYOUT=${LAYOUT/'%IFRAME_STYLES%'/"$IFRAME_STYLES"}
   LAYOUT=${LAYOUT/'%IFRAME_LINKS%'/"$IFRAME_LINKS"}
 
-  # wenn zu wenig dateien, dann lassen wir nur die hintergrundfarbe
   echo -n > "$WEB/if_$Id.media"
   read_mediafiles
   MEDIAFILES=`cat "$WEB/if_$Id.media"`
   LAYOUT=${LAYOUT/'%MEDIAFILES%'/"$MEDIAFILES"}
 
-  RELOAD="dsb_checkreload(\"indexX.html.md5\", $DSB_RELOAD_TIME);"
-  LAYOUT=${LAYOUT/'%DSB_RELOAD%'/"$RELOAD"}
   echo "$LAYOUT" > "$WEB/indexX.html"
 
   # generate md5sum of frame
@@ -471,8 +440,9 @@ generate_iframe() {
       ;;
   esac
 
-  STYLES[$Id]=`read_template_file "#Rahmen.txt"`
   if [ "$Type" != "Background" ]; then
+    STYLES[$Id]=`read_template_file "#Rahmen.txt"`
+
     # style
     echo "iframe#id$Id {
   position: fixed;
@@ -497,7 +467,7 @@ generate_site() {
   echo -n > "$CACHE/iframe-links"
 
   # 1a) Update directories
-  rsync -qau "$FILES/js/" "$WEB/js/"
+  rsync -qau "$LIBFILES/js/" "$WEB/js/"
 
   # 1b) Update Samba Templates (from System Templates)
   mkdir -p "$SMB/Templates"
