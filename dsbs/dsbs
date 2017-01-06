@@ -5,7 +5,7 @@
 #
 # ctime:   2016-08-25 /TR
 # mtime:   2016-08-26 /TR
-# version: 0.4
+# version: 0.5
 #
 # -> run it via cron like this:
 # */1 * * * * /usr/sbin/dsbs "dsb1"
@@ -158,7 +158,7 @@ EOF
 declare -A "WEEKPLAN" "OFFTIMES" "EVENTS" "MACS"
 
 # convert to unix format, leave it in the end for error checking...
-INI="/tmp/schedule.ini"
+INI="/tmp/schedule-$$.ini"
 exec 1> /tmp/dsbs.log
 exec 2> /tmp/dsbs.err
 cat "$SMB/DS-Schedule.dsbs" | dos2unix \
@@ -166,6 +166,7 @@ cat "$SMB/DS-Schedule.dsbs" | dos2unix \
 
 # read arrays
 read_dsbs "$INI"
+rm -f "$INI"
 
 # read current date, time and day of week
 DATETIME=`date +%u%Y%m%d%H%M`
