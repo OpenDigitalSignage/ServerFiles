@@ -6,7 +6,7 @@
 # ctime: 2016-08-25 /TR
 # mtime: 2016-08-25 /TR
 #
-# version: 0.2
+# version: 0.3
 #
 # -> run it via cron like this:
 # */1 * * * * /usr/sbin/dsbd "dsb1"
@@ -27,7 +27,6 @@ fi
 
 SMB="$SMB_PREFIX/$1/DS-Schedule.dsbs"
 WEB="$WEB_PREFIX/$1/status.txt"
-exec 2>/dev/null
 
 # check ini file @ smb share
 if [ ! -f "$SMB" ]; then
@@ -57,15 +56,15 @@ read_dsbs() {
     [0-9]*=1*)
       case $section in
       "[Weekplan]")
-        WEEKPLAN[$i]=$var
+        WEEKPLAN[$i]=${var#*|}
         i=$((i+1))
         ;;
       "[Offtimes]")
-        OFFTIMES[$i]=$var
+        OFFTIMES[$i]=${var#*|}
         i=$((i+1))
         ;;
       "[Events]")
-        EVENTS[$i]=$var
+        EVENTS[$i]=${var#*|}
         i=$((i+1))
         ;;
       "[Macs]")
@@ -82,17 +81,22 @@ read_dsbs() {
 wolcheck_etherwake() {
   NETDEVS=`cat /proc/net/dev | grep "eth"| cut -d: -f1`
   for i in ${!MACS[@]}; do
-    mac=`echo ${MACS[$i]} | cut -d'|' -f2`
+    str=${MACS[$i]}
+    str=${str#*|}
+    mac=${str:0:17}
     for dev in ${NETDEVS[@]}; do
-      $ETHERWAKE -i "$dev" "$mac"
+      echo $ETHERWAKE -i "$dev" "$mac"
     done
   done
 }
 
 wolcheck_wol() {
   for i in ${!MACS[@]}; do
-    mac=`echo ${MACS[$i]} | cut -d'|' -f2`
-    wol $mac
+    # 3=1|12:34:56:78:90:ef|DSB Lehrerzimmer
+    str=${MACS[$i]}
+    str=${str#*|}
+    mac=${str:0:17}
+    echo wol $mac
   done
 }
 
@@ -151,31 +155,32 @@ EOF
 
 # arrays @ schedule ini
 declare -A "WEEKPLAN" "OFFTIMES" "EVENTS" "MACS"
+exec 2>/dev/null
 
 # read arrays
 read_dsbs "$SMB"
 
 # read current date, time and day of week
-TODAY=`date +%Y%m%d`
-CTIME=`date +%H%M`
-DOW=`date +%u`
+DATETIME=`date +%u%Y%m%d%H%M`
+DOW=${DATETIME:0:1}
+TODAY=${DATETIME:1:8}
+CTIME=${DATETIME:9:4}
 
 ######################################################################
 # 1) check events
-# 1=1|YYYYmmdd|HHMM-HHMM|Layout|Beschreibung
 for x in ${!EVENTS[@]}; do
-  cl=${EVENTS[$x]}
   # 20170130|1100-1200|Layout2|Admin Day
-  str=${cl#*|}
+  str=${EVENTS[$x]}
   cl_date=${str:0:8}
   if [ "x$cl_date" = "x$TODAY" ]; then
-    cl_time=${str:10:9}
-    cl_time1=${str:10:4}
-    cl_time2=${str:15:4}
+    str=${str#*|}
+    cl_time=${str:0:9}
+    cl_time1=${str:0:4}
+    cl_time2=${str:5:4}
     if [ $CTIME -ge $cl_time1 -a $CTIME -le $cl_time2 ]; then
-      # would also work via bash parameter expansion, but not needed...
-      cl_layout=`echo $cl|cut -d'|' -f4`
-      cl_note=`echo $cl|cut -d'|' -f5`
+      str=${str#*|}
+      cl_layout=${str%|*}
+      cl_note=${str#*|}
       set_event
     fi
   fi
@@ -183,40 +188,37 @@ done
 
 ######################################################################
 # 2) check offtimes
-# 1=1|YYYYmmdd-YYYYmmdd|Beschreibung
 for x in ${!OFFTIMES[@]}; do
-  cl=${OFFTIMES[$x]}
   # YYYYmmdd-YYYYmmdd|Beschreibung
-  str=${cl#*|}
+  str=${OFFTIMES[$x]}
   cl_date1=${str:0:8}
   cl_date2=${str:9:8}
   if [ $TODAY -ge $cl_date1 -a $TODAY -le $cl_date2 ]; then
-    cl_note=`echo $cl|cut -d'|' -f3`
+    cl_note=${str#*|}
     set_offtime
   fi
 done
 
 ######################################################################
 # 3) check weekplan
-# 1=1|DOW|HHMM-HHMM|Layout
 for x in ${!WEEKPLAN[@]}; do
-  cl=${WEEKPLAN[$x]}
   # 5|0730-1230|Layout1
-  str=${cl#*|}
+  str=${WEEKPLAN[$x]}
   cl_dow=${str:0:1}
   if [ "x$cl_dow" = "x$DOW" ]; then
-    cl_time=${str:2:9}
-    cl_time1=${str:2:4}
-    cl_time2=${str:7:4}
+    str=${str#*|}
+    cl_time=${str:0:9}
+    cl_time1=${str:0:4}
+    cl_time2=${str:5:4}
     if [ $CTIME -ge $cl_time1 -a $CTIME -le $cl_time2 ]; then
-      cl_layout=`echo $cl|cut -d'|' -f4`
+      cl_layout=${str#*|}
       set_weekplan
     fi
   fi
 done
 
-# default, put tv off:
-cl_note="current date / time not in schedule"
+# default, shutdown the screen!
+cl_note="nothing scheduled, shutdown"
 cl_date1=$TODAY
 cl_date2=$TODAY
 set_offtime
