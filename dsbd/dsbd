@@ -14,7 +14,7 @@ FILES="/var/lib/dsb"
 TEMPLATES="$FILES/Templates"
 
 # time in seconds
-DSB_RELOAD_TIME="10"
+DSB_RELOAD_TIME="2"
 PDF_QUALITY="80"
 
 exec 1>>$LOG
@@ -78,12 +78,17 @@ cleanup() {
 
 # called, when we know all other updates do not need more work
 clean_fifo() {
+  counter=0
   while true; do
     # no data @ pipe
-    read -t 0.01 -u $FIFO_FD -r ignored
+    read -t 0.01 -u $FIFO_FD ignored
     test "$?" != "0" && break
-    echo "ignoring line: $ignored"
+    counter=$((counter+1))
+    # echo "ignoring line: $ignored"
   done
+  if [ "$counter" != "0" ]; then
+    log "Anzahl ignorierter Inotify's: $counter"
+  fi
 }
 
 # -> direct ins web
@@ -93,6 +98,20 @@ conv_direct() {
   Base=`basename "$FileName"`
 
   log "conv_direct($1)"
+  rm -rf "$Dir/$Base.d"
+  mkdir -p "$Dir/$Base.d"
+  ln -s "$FileName" "$Dir/$Base.d/$Base"
+  ls "$Dir/$Base.d" > "$FileName.txt"
+  # liste machen
+  find "$Dir/${Base}.d" -type l | sort > "$Dir/${Base}.txt"
+}
+
+conv_video() {
+  FileName="$1"
+  Dir=`dirname "$FileName"`
+  Base=`basename "$FileName"`
+
+  log "conv_video($1)"
   rm -rf "$Dir/$Base.d"
   mkdir -p "$Dir/$Base.d"
   ln -s "$FileName" "$Dir/$Base.d/$Base"
@@ -240,7 +259,7 @@ cache_file() {
 
 # Bilder und andere Mediendateien einlesen bzw. konvertieren
 read_mediafiles() {
-  log "read_mediafiles id($Id)"
+  # log "read_mediafiles id($Id)"
 
   # UserDir = Files aus dem Samba Share
   # CacheDir = dort wandeln wir um, *.txt wird ignoriert
@@ -254,7 +273,7 @@ read_mediafiles() {
   mkdir -p "$WEB/if_$Id"
 
   # für alle Dateien im SlideShow Ordner, die nicht *.txt sind:
-  find "$UserDir" -maxdepth 1 -type f \! -iname "*.txt" | while read F; do
+  find "$UserDir" -maxdepth 1 -type f \! -iname "*.txt" | sort | while read F; do
     File=`basename "$F"`
 
     # noch nicht im cache, da rein...
@@ -263,7 +282,7 @@ read_mediafiles() {
     -o "$CacheDir/$File" -nt "$CacheDir/$File" \
     || cache_file "$UserDir" "$CacheDir" "$File" "$Id"
 
-    log "read_cache($CacheDir/$File.txt)"
+    # log "read_cache($CacheDir/$File.txt)"
     if [ -f "$CacheDir/$File.txt" ]; then
       while read media; do
         # mediafile ins web verlinken und .txt file damit erstellen
@@ -271,6 +290,8 @@ read_mediafiles() {
         # /var/cache/dsb/dsb1/SlideShow #1/bg04.jpg.d/bg04.jpg
         ln -s -f "$media" "$WEB/if_$Id/$md5.png"
         echo "if_$Id/$md5.png" >> "$WEB/if_$Id.txt"
+        # xxx <video> ... 
+        echo "<img id=\"$md5\" src=\"if_$Id/$md5.png\">" >> "$WEB/if_$Id.media"
       done < "$CacheDir/$File.txt"
     fi
   done
@@ -303,13 +324,12 @@ generate_iframe_ticker() {
   LAYOUT=${LAYOUT/'%STYLE%'/"$STYLE"}
   LAYOUT=${LAYOUT/'%OPTIONEN%'/"$OPTIONEN"}
   T=""
-  while IFS= read -r tline; do
+  while read -r tline; do
     T="$T<li>$tline</li>"
   done <<< "$TICKER"
   LAYOUT=${LAYOUT/'%TICKER%'/"$T"}
 
-  RELOAD="dsb_checkreload(\"if_$Id.html\", $DSB_RELOAD_TIME);"
-  RELOAD="$RELOAD /* `date` */ "
+  RELOAD="dsb_checkreload(\"if_$Id.html.md5\", $DSB_RELOAD_TIME);"
   LAYOUT=${LAYOUT/'%DSB_RELOAD%'/"$RELOAD"}
   echo "$LAYOUT" > "$WEB/if_$Id.html"
 }
@@ -323,14 +343,15 @@ generate_iframe_slideshow() {
   LAYOUT=`read_template_file "#Layout.txt"`
   OPTIONEN=`read_template_file "#Optionen.txt"`
 
-  read_mediafiles
-
   LAYOUT=${LAYOUT/'%STYLE%'/"$STYLE"}
   LAYOUT=${LAYOUT/'%OPTIONEN%'/"$OPTIONEN"}
-  LAYOUT=${LAYOUT/'%SLIDESHOW%'/"\"if_$Id.txt\""}
 
-  RELOAD="dsb_checkreload(\"if_$Id.html\", $DSB_RELOAD_TIME);"
-  RELOAD="$RELOAD /* `date` */ "
+  echo -n > "$WEB/if_$Id.media"
+  read_mediafiles
+  MEDIAFILES=`cat "$WEB/if_$Id.media"`
+  LAYOUT=${LAYOUT/'%MEDIAFILES%'/"$MEDIAFILES"}
+
+  RELOAD="dsb_checkreload(\"if_$Id.html.md5\", $DSB_RELOAD_TIME);"
   LAYOUT=${LAYOUT/'%DSB_RELOAD%'/"$RELOAD"}
   echo "$LAYOUT" > "$WEB/if_$Id.html"
 }
@@ -344,8 +365,7 @@ generate_iframe_uhr() {
   LAYOUT=${LAYOUT/'%STYLE%'/"$STYLE"}
   LAYOUT=${LAYOUT/'%OPTIONEN%'/"$OPTIONEN"}
 
-  RELOAD="dsb_checkreload(\"if_$Id.html\", $DSB_RELOAD_TIME);"
-  RELOAD="$RELOAD /* `date` */ "
+  RELOAD="dsb_checkreload(\"if_$Id.html.md5\", $DSB_RELOAD_TIME);"
   LAYOUT=${LAYOUT/'%DSB_RELOAD%'/"$RELOAD"}
   echo "$LAYOUT" > "$WEB/if_$Id.html"
 }
@@ -359,8 +379,7 @@ generate_iframe_webseite() {
   LAYOUT=${LAYOUT/'%STYLE%'/"$STYLE"}
   LAYOUT=${LAYOUT/'%OPTIONEN%'/"$OPTIONEN"}
 
-  RELOAD="dsb_checkreload(\"if_$Id.html\", $DSB_RELOAD_TIME);"
-  RELOAD="$RELOAD /* `date` */ "
+  RELOAD="dsb_checkreload(\"if_$Id.html.md5\", $DSB_RELOAD_TIME);"
   LAYOUT=${LAYOUT/'%DSB_RELOAD%'/"$RELOAD"}
   echo "$LAYOUT" > "$WEB/if_$Id.html"
 }
@@ -374,8 +393,7 @@ generate_iframe_newsfeed() {
   LAYOUT=${LAYOUT/'%STYLE%'/"$STYLE"}
   LAYOUT=${LAYOUT/'%OPTIONEN%'/"$OPTIONEN"}
 
-  RELOAD="dsb_checkreload(\"if_$Id.html\", $DSB_RELOAD_TIME);"
-  RELOAD="$RELOAD /* `date` */ "
+  RELOAD="dsb_checkreload(\"if_$Id.html.md5\", $DSB_RELOAD_TIME);"
   LAYOUT=${LAYOUT/'%DSB_RELOAD%'/"$RELOAD"}
   echo "$LAYOUT" > "$WEB/if_$Id.html"
 }
@@ -393,44 +411,45 @@ generate_iframe_wetter() {
   LAYOUT=${LAYOUT/'%BUTTON2%'/"$BUTTON2"}
   LAYOUT=${LAYOUT/'%BUTTON3%'/"$BUTTON3"}
 
-  RELOAD="dsb_checkreload(\"if_$Id.html\", $DSB_RELOAD_TIME);"
-  RELOAD="$RELOAD /* `date` */ "
+  RELOAD="dsb_checkreload(\"if_$Id.html.md5\", $DSB_RELOAD_TIME);"
   LAYOUT=${LAYOUT/'%DSB_RELOAD%'/"$RELOAD"}
   echo "$LAYOUT" > "$WEB/if_$Id.html"
 }
 
 # Frameset
 generate_index() {
+  log "Erstelle Index($Id), Type=$Type, Section=$Section"
+
   STYLE=`read_template_file "#Style.txt"`
   LAYOUT=`read_template_file "#Layout.txt"`
+  OPTIONEN=`read_template_file "#Optionen.txt"`
   IFRAME_STYLES=`cat "$CACHE/iframe-styles"`
   IFRAME_LINKS=`cat "$CACHE/iframe-links"`
 
   LAYOUT=${LAYOUT/'%STYLE%'/"$STYLE"}
+  LAYOUT=${LAYOUT/'%OPTIONEN%'/"$OPTIONEN"}
   LAYOUT=${LAYOUT/'%IFRAME_STYLES%'/"$IFRAME_STYLES"}
   LAYOUT=${LAYOUT/'%IFRAME_LINKS%'/"$IFRAME_LINKS"}
 
   # wenn zu wenig dateien, dann lassen wir nur die hintergrundfarbe
+  echo -n > "$WEB/if_$Id.media"
   read_mediafiles
-  IndexImages=`cat "$WEB/if_$Id.txt"|  wc -l`
-  if [ "$IndexImages" -gt 2 ]; then
-    BACKGROUND="dsb_background(\"if_$Id.txt\", \"bg\");"
-  else
-    BACKGROUND=""
-  fi
-  LAYOUT=${LAYOUT/'%DSB_BACKGROUND%'/"$BACKGROUND"}
+  MEDIAFILES=`cat "$WEB/if_$Id.media"`
+  LAYOUT=${LAYOUT/'%MEDIAFILES%'/"$MEDIAFILES"}
 
-  RELOAD="dsb_checkreload(\"indexX.html\", $DSB_RELOAD_TIME);"
-  RELOAD="$RELOAD /* `date` */ "
+  RELOAD="dsb_checkreload(\"indexX.html.md5\", $DSB_RELOAD_TIME);"
   LAYOUT=${LAYOUT/'%DSB_RELOAD%'/"$RELOAD"}
   echo "$LAYOUT" > "$WEB/indexX.html"
+
+  # generate md5sum of frame
+  cat "$WEB/indexX.html" | md5sum > "$WEB/indexX.html.md5"
 }
 
 generate_iframe() {
   # Update User Template from Samba Template
   rsync -aqu "$SMB/Templates/$Type/" "$SMB/$Section/"
 
-  log "generate_iframe() id=$Id / Section=$Section / Type=$Type"
+  log "Erstelle Frame($Id), Type=$Type, Section=$Section"
   case "$Type" in
     "Wetter")
       generate_iframe_wetter
@@ -466,6 +485,9 @@ generate_iframe() {
 
     echo "<iframe id=\"id$Id\" src=\"if_$Id.html\" scrolling=\"no\"></iframe>" \
       >> "$CACHE/iframe-links"
+
+    # generate md5sum of frame
+    cat "$WEB/if_$Id.html" | md5sum > "$WEB/if_$Id.html.md5"
   fi
 }
 
@@ -484,13 +506,7 @@ generate_site() {
   # 2) reset FIFO Queue
   # wir bauen die ganze seite neu, alle anderen geänderten
   # files machen wir also indirekt mit!
-  #clean_fifo
-
-  # "Wetter #1"
-  # -> Section="${SECTIONS[$Id]}"
-
-  # Types: Background Wetter Ticker SlideShow Uhr Webseite Newsfeed
-  # -> Type="${TYPES[$Id]}"
+  clean_fifo
 
   # 3) nur die iframes generieren
   for Id in ${!SECTIONS[@]}; do
@@ -514,8 +530,7 @@ generate_site() {
 # read layout file and set up the arrays:
 # SECTIONS + TYPES + TOP + ...
 read_layout() {
-  file="$1"
-  i="-1"
+  local i="-1"
   while IFS=$'' read var val; do
     # section found
     if [[ $var == \[* ]]; then
@@ -530,13 +545,12 @@ read_layout() {
     if [[ $var == Top=* ]]; then x=`echo "$var"|cut -b 5-`; TOP[$i]="$x"; fi
     if [[ $var == Width=* ]]; then x=`echo "$var"|cut -b 7-`; WIDTH[$i]="$x"; fi
     if [[ $var == Height=* ]]; then x=`echo "$var"|cut -b 8-`; HEIGHT[$i]="$x"; fi
-  done < "$file"
+  done < "$1"
 
   generate_site
 }
 
 remove_layout() {
-  log "remove_layout()"
   for i in ${!SECTIONS[@]}; do
     s="${SECTIONS[$i]}"
     unset SECTIONS[$i]
@@ -545,31 +559,28 @@ remove_layout() {
     unset TOP[$i]
     unset WIDTH[$i]
     unset HEIGHT[$i]
-    rm -rf "$SMB/$s" "$WEB/$s" "$WEB/if_$i" "$WEB/if_$i.html" \
-      "$WEB/if_$i.txt" "$WEB/index.html" "$WEB/js/"
+    rm -rf "$SMB/$s" "$WEB/$s" "$WEB/js/" \
+     "$WEB/if_$i."* "$WEB/if_$i" "$WEB/index."* "$CACHE"/*
   done
 }
 
 # file was created @ $SMB
 handle_create() {
-  fullpath="$1"
-  directory="$2"
-  basefile="$3"
-
-  log "handle_create file($basefile) dir($directory) orig($fullpath)"
+  # log "handle_create file($basefile) dir($directory) orig($fullpath)"
 
   # special file "Layout.dsb"
   if [ "${basefile}" = "layout.dsb" ]; then
+    log "Layout einlesen: [$directory/$basefile]"
     cat "$fullpath" | dos2unix > "$CACHE/$basefile"
     read_layout "$CACHE/$basefile"
     rm -f "$CACHE/$basefile"
-    #clean_fifo
   fi
 
   # check if some section was modified
   for i in ${!SECTIONS[@]}; do
     Section="${SECTIONS[$i],,}"
     if [ "${directory}" = "$Section" ]; then
+      log "Datei erstellt/geändert:  [$directory/$basefile]"
       generate_site
     fi
   done
@@ -577,14 +588,11 @@ handle_create() {
 
 # file was removed in $SMB
 handle_delete() {
-  fullpath="$1"
-  directory="$2"
-  basefile="$3"
-
-  log "handle_delete file($basefile) dir($directory) orig($fullpath)"
+  # log "handle_delete file($basefile) dir($directory) orig($fullpath)"
 
   # special file "Layout.dsb"
   if [ "${basefile}" = "layout.dsb" ]; then
+    log "Layout enfernt..."
     remove_layout
   fi
 
@@ -592,6 +600,7 @@ handle_delete() {
   for i in ${!SECTIONS[@]}; do
     Section="${SECTIONS[$i],,}"
     if [ "${directory}" = "$Section" ]; then
+      log "Datei gelöscht: [$directory/$basefile]"
       generate_site
     fi
   done
@@ -612,11 +621,11 @@ INOTIFY_PID=$?
 
 # big loop, which starts things on some events
 waiting="yes"
-while IFS= read -u $FIFO_FD -r line; do
+while read -u $FIFO_FD -r inotifyline; do
 
   # wait for inotify to be ready
   if [ "$waiting" = "yes" ]; then
-    test "$line" = "Watches established." || continue
+    test "$inotifyline" = "Watches established." || continue
     waiting="no"
 
     # touch all dsb files in smb root (force reading them)
@@ -627,8 +636,8 @@ while IFS= read -u $FIFO_FD -r line; do
   fi
 
   # thats the real input now
-  fullpath=`echo $line|cut -d'|' -f2`
-  event=`echo $line|cut -d'|' -f3`
+  fullpath=`echo $inotifyline|cut -d'|' -f2`
+  event=`echo $inotifyline|cut -d'|' -f3`
 
   # remove $SMB prefix
   # /home/dsb/dsb1/path/file.txt -> path/file.txt
@@ -652,19 +661,19 @@ while IFS= read -u $FIFO_FD -r line; do
   # create / delete
   case "$event" in
     "CREATE")
-      handle_create "$fullpath" "$directory" "$basefile"
+      handle_create
     ;;
     "CLOSE_WRITE,CLOSE")
-      handle_create "$fullpath" "$directory" "$basefile"
+      handle_create
     ;;
     "MOVED_TO")
-      handle_create "$fullpath" "$directory" "$basefile"
+      handle_create
     ;;
     "MOVED_FROM")
-      handle_delete "$fullpath" "$directory" "$basefile"
+      handle_delete
     ;;
     "DELETE")
-      handle_delete "$fullpath" "$directory" "$basefile"
+      handle_delete
     ;;
   esac
 done
