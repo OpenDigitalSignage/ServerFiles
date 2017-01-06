@@ -1,0 +1,216 @@
+#!/bin/sh
+
+#############################################
+# DSBS - Digital Signage Background Schedule
+#
+# ctime: 2016-08-25 /TR
+# mtime: 2016-08-25 /TR
+#
+# version: 0.1
+#
+# -> run it via cron like this:
+# */1 * * * * /usr/sbin/dsbd "dsb1"
+# */1 * * * * /usr/sbin/dsbd "dsb-xxl"
+#############################################
+
+SMB_PREFIX="/home/dsb"
+WEB_PREFIX="/var/www/html/dsb"
+
+# testing
+SMB_PREFIX="."
+WEB_PREFIX="."
+
+if [ -z $1 ]; then
+  echo "Need exact one parameter!"
+  exit 1
+fi
+
+SMB="$SMB_PREFIX/$1/DS-Schedule.dsbs"
+WEB="$WEB_PREFIX/$1/status.txt"
+exec 2>/dev/null
+
+# check ini file @ smb share
+if [ ! -f "$SMB" ]; then
+  echo "$SMB not found!"
+  exit 2
+fi
+
+# check statusfile @ web share
+touch $WEB
+if [ "x$?" != "x0" ]; then
+  echo "Problem while creating $WEB !"
+  exit 3
+fi
+
+# parse dsbs ini file, create 4 arrays
+read_dsbs() {
+  local i
+  while IFS=$'' read var; do
+    # section found
+    if [[ $var == \[*\] ]]; then
+      section=$var
+      i=0
+      continue
+    fi
+    # check for valid entry
+    case $var in
+    [0-9]*=1*)
+      case $section in
+      "[Weekplan]")
+        WEEKPLAN[$i]=$var
+        i=$((i+1))
+        ;;
+      "[Offtimes]")
+        OFFTIMES[$i]=$var
+        i=$((i+1))
+        ;;
+      "[Events]")
+        EVENTS[$i]=$var
+        i=$((i+1))
+        ;;
+      "[Macs]")
+        MACS[$i]=$var
+        i=$((i+1))
+        ;;
+      esac
+      # echo "var=$var, sektion=$section, i=$i"
+      ;;
+    esac
+  done < "$1"
+}
+
+wolcheck_etherwake() {
+  NETDEVS=`cat /proc/net/dev | grep "eth"| cut -d: -f1`
+  for i in ${!MACS[@]}; do
+    mac=`echo ${MACS[$i]} | cut -d'|' -f2`
+    for dev in ${NETDEVS[@]}; do
+      $ETHERWAKE -i "$dev" "$mac"
+    done
+  done
+}
+
+wolcheck_wol() {
+  for i in ${!MACS[@]}; do
+    mac=`echo ${MACS[$i]} | cut -d'|' -f2`
+    wol $mac
+  done
+}
+
+# ON|MAC|Beschreibung
+# [Macs]
+wolcheck() {
+  # wol via ether-wake
+  ETHERWAKE=`which ether-wake`
+  if [ ! -z $ETHERWAKE ]; then
+    wolcheck_etherwake
+    return 0
+  fi
+
+  # wol via wol tool
+  WOL=`which wol`
+  if [ ! -z $WOL ]; then
+    wolcheck_wol
+    return 0
+  fi
+}
+
+# ON|YYYYmmdd|HHMM-HHMM|Layout|Beschreibung
+function set_event() {
+  cat <<EOF > $WEB
+SHUTDOWN=0
+NOTE=$cl_note
+LAYOUT=$cl_layout
+TIME=$cl_time
+DATE=$cl_date
+EOF
+  wolcheck
+  exit
+}
+
+function set_offtime() {
+  cat <<EOF > $WEB
+SHUTDOWN=1
+NOTE=$cl_note
+DATE1=$cl_date1
+DATE2=$cl_date2
+EOF
+  exit
+}
+
+function set_weekplan() {
+  cat <<EOF > $WEB
+SHUTDOWN=0
+NOTE=weekplan
+LAYOUT=$cl_layout
+TIME=$cl_time
+DOW=$cl_dow
+EOF
+  wolcheck
+  exit
+}
+
+# arrays @ schedule ini
+declare -A "WEEKPLAN" "OFFTIMES" "EVENTS" "MACS"
+
+# read arrays
+read_dsbs "$SMB"
+
+# read current date, time and day of week
+TODAY=`date +%Y%m%d`
+CTIME=`date +%H%M`
+DOW=`date +%u`
+
+######################################################################
+# 1) check events
+# 1=1|20170130|1100-1200|Layout2|Admin Day
+# 1=1|YYYYmmdd|HHMM-HHMM|Layout|Beschreibung
+for x in ${!EVENTS[@]}; do
+  cl=${EVENTS[$x]}
+  cl_date=`echo $cl|cut -d'|' -f2`
+  if [ "x$cl_date" = "x$TODAY" ]; then
+    cl_time=`echo $cl|cut -d'|' -f3`
+    cl_time1=`echo $cl_time|cut -d'-' -f1`
+    cl_time2=`echo $cl_time|cut -d'-' -f2`
+    if [ $CTIME -ge $cl_time1 -a $CTIME -le $cl_time2 ]; then
+      cl_layout=`echo $cl|cut -d'|' -f4`
+      cl_note=`echo $cl|cut -d'|' -f5`
+      set_event
+    fi
+  fi
+done
+
+######################################################################
+# 2) check offtimes
+# 1=1|YYYYmmdd-YYYYmmdd|Beschreibung
+for x in ${!OFFTIMES[@]}; do
+  cl=${OFFTIMES[$x]}
+  cl_date1=`echo $cl|cut -d'|' -f2|cut -d'-' -f1`
+  cl_date2=`echo $cl|cut -d'|' -f2|cut -d'-' -f2`
+  if [ $TODAY -ge $cl_date1 -a $TODAY -le $cl_date2 ]; then
+    cl_note=`echo $cl|cut -d'|' -f3`
+    set_offtime
+  fi
+done
+
+######################################################################
+# 3) check weekplan
+# 1=1|DOW|HHMM-HHMM|Layout
+for x in ${!WEEKPLAN[@]}; do
+  cl=${WEEKPLAN[$x]}
+  cl_dow=`echo $cl|cut -d'|' -f2`
+  if [ "x$cl_dow" = "x$DOW" ]; then
+    cl_time=`echo $cl|cut -d'|' -f3`
+    cl_time1=`echo $cl_time|cut -d'-' -f1`
+    cl_time2=`echo $cl_time|cut -d'-' -f2`
+    if [ $CTIME -ge $cl_time1 -a $CTIME -le $cl_time2 ]; then
+      cl_layout=`echo $cl|cut -d'|' -f4`
+      set_weekplan
+    fi
+  fi
+done
+
+# default, put tv off:
+cl_note="current date / time not in schedule"
+cl_date1=$TODAY
+cl_date2=$TODAY
+set_offtime
