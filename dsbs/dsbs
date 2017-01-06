@@ -1,4 +1,4 @@
-#!/bin/sh
+#!/bin/bash
 
 #############################################
 # DSBS - Digital Signage Background Schedule
@@ -6,7 +6,7 @@
 # ctime: 2016-08-25 /TR
 # mtime: 2016-08-25 /TR
 #
-# version: 0.1
+# version: 0.2
 #
 # -> run it via cron like this:
 # */1 * * * * /usr/sbin/dsbd "dsb1"
@@ -16,7 +16,7 @@
 SMB_PREFIX="/home/dsb"
 WEB_PREFIX="/var/www/html/dsb"
 
-# testing
+# uncomment for testing @ ./$NAME/...
 SMB_PREFIX="."
 WEB_PREFIX="."
 
@@ -162,16 +162,18 @@ DOW=`date +%u`
 
 ######################################################################
 # 1) check events
-# 1=1|20170130|1100-1200|Layout2|Admin Day
 # 1=1|YYYYmmdd|HHMM-HHMM|Layout|Beschreibung
 for x in ${!EVENTS[@]}; do
   cl=${EVENTS[$x]}
-  cl_date=`echo $cl|cut -d'|' -f2`
+  # 20170130|1100-1200|Layout2|Admin Day
+  str=${cl#*|}
+  cl_date=${str:0:8}
   if [ "x$cl_date" = "x$TODAY" ]; then
-    cl_time=`echo $cl|cut -d'|' -f3`
-    cl_time1=`echo $cl_time|cut -d'-' -f1`
-    cl_time2=`echo $cl_time|cut -d'-' -f2`
+    cl_time=${str:10:9}
+    cl_time1=${str:10:4}
+    cl_time2=${str:15:4}
     if [ $CTIME -ge $cl_time1 -a $CTIME -le $cl_time2 ]; then
+      # would also work via bash parameter expansion, but not needed...
       cl_layout=`echo $cl|cut -d'|' -f4`
       cl_note=`echo $cl|cut -d'|' -f5`
       set_event
@@ -184,8 +186,10 @@ done
 # 1=1|YYYYmmdd-YYYYmmdd|Beschreibung
 for x in ${!OFFTIMES[@]}; do
   cl=${OFFTIMES[$x]}
-  cl_date1=`echo $cl|cut -d'|' -f2|cut -d'-' -f1`
-  cl_date2=`echo $cl|cut -d'|' -f2|cut -d'-' -f2`
+  # YYYYmmdd-YYYYmmdd|Beschreibung
+  str=${cl#*|}
+  cl_date1=${str:0:8}
+  cl_date2=${str:9:8}
   if [ $TODAY -ge $cl_date1 -a $TODAY -le $cl_date2 ]; then
     cl_note=`echo $cl|cut -d'|' -f3`
     set_offtime
@@ -197,11 +201,13 @@ done
 # 1=1|DOW|HHMM-HHMM|Layout
 for x in ${!WEEKPLAN[@]}; do
   cl=${WEEKPLAN[$x]}
-  cl_dow=`echo $cl|cut -d'|' -f2`
+  # 5|0730-1230|Layout1
+  str=${cl#*|}
+  cl_dow=${str:0:1}
   if [ "x$cl_dow" = "x$DOW" ]; then
-    cl_time=`echo $cl|cut -d'|' -f3`
-    cl_time1=`echo $cl_time|cut -d'-' -f1`
-    cl_time2=`echo $cl_time|cut -d'-' -f2`
+    cl_time=${str:2:9}
+    cl_time1=${str:2:4}
+    cl_time2=${str:7:4}
     if [ $CTIME -ge $cl_time1 -a $CTIME -le $cl_time2 ]; then
       cl_layout=`echo $cl|cut -d'|' -f4`
       set_weekplan
