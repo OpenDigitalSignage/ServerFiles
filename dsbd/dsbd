@@ -119,7 +119,7 @@ conv_direct() {
   ln -s "$CacheDir/$File" "$CacheDir/$File.d/$File"
   # <img> liste machen
   echo -n > "$CacheDir/$File.img"
-  find "$CacheDir/$File.d" -name "*.$lcExt" | sort | while read f; do
+  find "$CacheDir/$File.d" -iname "*.$lcExt" | sort | while read f; do
     md5=`echo $f|md5sum | cut -b1-32`
     #log "echo $f|md5sum | cut -b1-32 = md5($md5)"
     ln -s -f "$f" "$WEB/if_$Id/$md5.$lcExt"
@@ -135,7 +135,7 @@ conv_video() {
   ln -s "$CacheDir/$File" "$CacheDir/$File.d/$File"
   # <video> liste machen
   echo -n > "$CacheDir/$File.video"
-  find "$CacheDir/$File.d" -name "*.$lcExt" | sort | while read f; do
+  find "$CacheDir/$File.d" -iname "*.$lcExt" | sort | while read f; do
     md5=`echo $f|md5sum | cut -b1-32`
     ln -s -f "$f" "$WEB/if_$Id/$md5.$lcExt"
     echo "<video id=\"$md5\" src=\"if_$Id/$md5.$lcExt\" controls></video>" >> "$CacheDir/$File.video"
@@ -156,7 +156,7 @@ conv_mutool() {
   log "conv_mutool -> $CacheDir/$File.img"
   rm -rf "$CacheDir/$File.d"
   mkdir -p "$CacheDir/$File.d"
-  mutool draw $PDF_QUALITY -o "$CacheDir/$File.d/${File}_%03d.png" "$CacheDir/$File"
+  mutool draw $PDF_QUALITY -o "$CacheDir/$File.d/$File_%03d.png" "$CacheDir/$File"
   generate_img_list
 }
 
@@ -174,9 +174,9 @@ conv_office() {
   rm -f "$File"
   # pdf nach png:
   FileNoExt=${File%.*}
-  mutool draw $PDF_QUALITY -o "${File}_%03d.png" "$FileNoExt.pdf"
+  mutool draw $PDF_QUALITY -o "$File_%03d.png" "$FileNoExt.pdf"
   rm -f "$FileNoExt.pdf"
-  cd $CACHE
+  cd "$CACHE"
   generate_img_list
 }
 
