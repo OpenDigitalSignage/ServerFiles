@@ -3,8 +3,8 @@
 # dsb daemon written in shell
 #
 # ctime: 2015-12-18 /TR
-# mtime: 2016-01-04 /TR
-# version: 0.12
+# mtime: 2016-01-06 /TR
+# version: 0.13
 #############################################
 
 SMB="$1"
@@ -15,7 +15,6 @@ CACHE="$5"
 
 # javascript files and templates
 LIBFILES="/var/lib/dsb"
-TEMPLATES="$LIBFILES/Templates"
 
 # time in seconds
 DSB_RELOAD_TIME="5"
@@ -74,7 +73,7 @@ EOF
   if [ ! -d "$SMB/Templates" ]; then
     log "Erstelle Samba Template Dateien..."
     mkdir -p "$SMB/Templates"
-    rsync -aqu "$TEMPLATES/" "$SMB/Templates/"
+    rsync -aqu "$LIBFILES/Templates/" "$SMB/Templates/"
   fi
 
   cd $CACHE || error "Could not change to cachedir $CACHE"
@@ -252,7 +251,8 @@ read_template_file() {
 
   # log "find \"$UserDir\" -iname \"$File\""
   find "$UserDir" -iname "$File" | while read f; do
-    cat "$f" | dos2unix
+    # \r\n -> \n + utf8 BOM weg machen
+    cat "$f" | dos2unix | sed -e 's/\xef\xbb\xbf//g'
   done
 }
 
@@ -374,8 +374,15 @@ generate_site() {
   echo -n > "$CACHE/iframe-styles"
   echo -n > "$CACHE/iframe-links"
 
-  # 1) Update directories
+  # 1a) Update directories
   rsync -qau "$LIBFILES/js/" "$WEB/js/"
+
+  # 1b) Update Samba Templates (from System Templates)
+  if [ ! -d "$SMB/Templates" ]; then
+    log "Erstelle Samba Template Dateien..."
+    mkdir -p "$SMB/Templates"
+    rsync -aqu "$LIBFILES/Templates/" "$SMB/Templates/"
+  fi
 
   # 2) reset FIFO Queue
   # wir bauen die ganze seite neu, alle anderen geänderten
