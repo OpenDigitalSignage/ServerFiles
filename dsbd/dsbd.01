@@ -1,0 +1,413 @@
+#!/bin/bash
+# check for updates on the samba share "$SMB"
+
+# /usr/bin/dsb-check /home/dsb/dsb2 /var/www/html/dsb2 /var/log/dsb2.log /var/run/dsb2.fifo /var/cache/dsb2
+SMB="$1"
+WEB="$2"
+LOG="$3"
+FIFO="$4"
+CACHE="$5"
+
+# javascript files and templates
+FILES="/var/lib/dsb"
+TEMPLATES="$SMB/Templates"
+
+exec 1>>$LOG
+exec 2>&1
+
+# log sth.
+log() {
+  d=`date "+%Y-%m-%d %H:%M:%S"`
+  echo "[$d] $*" >> $LOG
+}
+
+# exit with some error
+error() {
+  log "$*"
+  exit 1
+}
+
+# called once in beginning
+startup() {
+  log "START SERVICE"
+
+  # test for some tools, which are needed
+  test -x /usr/bin/ffmpeg || error "Need ffmpeg!"
+  test -x /usr/bin/mutool || error "Need mutool!"
+  test -x /usr/bin/dos2unix || error "Need dos2unix!"
+  test -x /usr/bin/libreoffice || error "Need libreoffice!"
+
+  # register cleanup function
+  trap cleanup SIGHUP SIGINT SIGTERM SIGQUIT
+
+  # libreoffice setup, we want nice pdf output!
+  # https://wiki.openoffice.org/wiki/API/Tutorials/PDF_export
+  CFG="$HOME/.config/libreoffice/4/user/registrymodifications.xcu"
+  mkdir -p `dirname $CFG`
+  cat <<EOF > $CFG
+<?xml version="1.0" encoding="UTF-8"?>
+<oor:items xmlns:oor="http://openoffice.org/2001/registry" xmlns:xs="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+<item oor:path="/org.openoffice.Office.Common/Filter/PDF/Export"><prop oor:name="ExportFormFields" oor:op="fuse"><value>false</value></prop></item>
+<item oor:path="/org.openoffice.Office.Common/Filter/PDF/Export"><prop oor:name="IsAddStream" oor:op="fuse"><value>false</value></prop></item>
+<item oor:path="/org.openoffice.Office.Common/Filter/PDF/Export"><prop oor:name="MaxImageResolution" oor:op="fuse"><value>1200</value></prop></item>
+<item oor:path="/org.openoffice.Office.Common/Filter/PDF/Export"><prop oor:name="ReduceImageResolution" oor:op="fuse"><value>false</value></prop></item>
+<item oor:path="/org.openoffice.Office.Common/Filter/PDF/Export"><prop oor:name="UseLosslessCompression" oor:op="fuse"><value>true</value></prop></item>
+<item oor:path="/org.openoffice.Office.Common/Filter/PDF/Export"><prop oor:name="SelectPdfVersion" oor:op="fuse"><value>1</value></prop></item>
+<item oor:path="/org.openoffice.Office.Common/Filter/PDF/Export"><prop oor:name="Quality" oor:op="fuse"><value>100</value></prop></item>
+EOF
+
+  cd $CACHE || error "Could not change to cachedir $CACHE"
+}
+
+# called once on end
+cleanup() {
+  log "END SERVICE"
+  kill $INOTIFY_PID
+  exit 0
+}
+
+###### xxx
+# document.getElementById('some_frame_id').contentWindow.location.reload();
+
+
+# -> direct ins web
+conv_image() {
+  cp $1 $2
+}
+
+# pdf, xps, cbz, and epub -> image
+conv_pdf() {
+  mutool draw -r 128 -o "%03d.png" puehlhofer_samstag_jan06_mitreferenzen.pdf
+}
+
+# office -> pdf -> image
+# - wichtig, libreoffice einmal starten und pdf export qualität festlegen
+conv_office() {
+  libreoffice --convert-to "pdf" --headless $*
+}
+
+generate_index() {
+  file="$1"
+  style="$2"
+cat <<EOF > $file
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <script type="text/javascript" src="js/jquery.min.js"></script>
+  <script type="text/javascript" src="js/dsb.js"></script>
+
+<style>
+html {
+  margin: 0; border: 0; padding: 0;
+  height: 100%;
+}
+
+body {
+  margin: 0; border: 0; padding: 0;
+  height: 100%;
+  font-family: sans-serif;
+  font-size: 2.5vw;
+  color: #000000;
+}
+
+iframe#links {
+  position: fixed;
+  top: 2%;
+  left: 1%;
+  width: 41%;
+  height: 90%;
+  /*background-color: silver;*/
+}
+
+iframe#rechts {
+  position: fixed;
+  top: 2%;
+  left: 58%;
+  width: 41%;
+  height: 44%;
+  /*background-color: red;*/
+}
+
+iframe#rechts2 {
+  position: fixed;
+  top: 49%;
+  left: 58%;
+  width: 41%;
+  height: 43%;
+  /*background-color: red;*/
+}
+
+iframe#ticker {
+  position: fixed;
+  top: 94%;
+  left: 1%;
+  width: 98%;
+  height: 5%;
+  border: solid 1px #000000;
+  /*background-color: blue;*/
+  background-color: rgba(33, 33, 33, 0.8);
+}
+
+iframe#uhr {
+  position:fixed;
+  top: 18%;
+  left: 43%;
+  width: 14%;
+  height: 27%;
+  border: 0;
+}
+
+iframe#wetter {
+  position: fixed;
+  top: 43%;
+  left: 43%;
+  width: 14%;
+  height: 49%;
+  /*background-color: green;*/
+  border: 0;
+  border-radius: 10px;                     /* "runde ecken" */
+  box-shadow: 5px 5px 5px #111111;         /* schatten */
+}
+
+.round {
+  border: solid 1px #000000;
+  border-radius: 10px;                     /* "runde ecken" */
+  box-shadow: 5px 5px 5px #111111;         /* schatten */
+  background-color: rgba(33, 33, 33, 0.2); /* hintergrund leicht angrauen... */
+}
+
+.shadow {
+  /* schatten für ticker text */
+  text-shadow:5px 5px 5px #cccccc;
+}
+
+.bg {
+  position: absolute;
+  z-index: -1;
+  top:0;
+  left:0;
+  width:100%;  /* Seitenverhältnis sollte passen! /TR */
+  height:100%; /* -> oder einen der beiden Werte raus nehmen... */
+}
+</style>
+
+</head>
+<body>
+
+<!-- hintergrund -->
+<div id="bg"></div>
+<script type="text/javascript">
+ dsb_background("img_bg.txt", "bg");
+</script>
+
+<!--
+Platzhalter, hier kann man iframes "parken" ;)
+
+<iframe class="round" id="links"   src="if_feed.html"   frameborder="1" allowTransparency="true" scrolling="no"></iframe>
+-->
+<iframe id="links"   src="if_links.html"   frameborder="0" scrolling="no" class="round"></iframe>
+<iframe id="rechts"  src="if_rechts.html"  frameborder="0" scrolling="no" class="round"></iframe>
+<iframe id="rechts2" src="if_feed.html"    frameborder="0" scrolling="no" class="round"></iframe>
+<iframe id="ticker"  src="if_ticker.html"  frameborder="0" scrolling="no" class="round"></iframe>
+<iframe id="uhr"     src="if_uhr.html"     frameborder="0" scrolling="no"></iframe>
+<iframe id="wetter"  src="if_wetter.html"  frameborder="0" scrolling="no"></iframe>
+
+<script type="text/javascript">
+ dsb_checkreload("ticker.txt", 5);
+</script>
+
+</body>
+</html>
+EOF
+}
+
+# read layout file and set the array SECTIONS and TYPES
+read_layout() {
+  file="$1"
+  i=0
+  while IFS=$'' read var val; do
+    # section found
+    if [[ $var == \[* ]]; then
+      # sectionen die mit '#' beginnen, ignorieren
+      x=`echo "$var"|tr -d "[]"|grep -v '^#'`
+      test "x$x" = "x" && continue
+      SECTIONS[$i]="$x"
+      i=$((i+1))
+    fi
+    # type of last section found
+    if [[ $var == Type=* ]]; then
+      x=`echo "$var"|cut -b 6-`
+      j=$((i-1))
+      TYPES[$j]="$x"
+    fi
+  done < "$file"
+
+  # create directories in $SMB and $WEB
+  for i in ${!SECTIONS[@]}; do
+    Type="${TYPES[$i]}"
+    Section="${SECTIONS[$i]}"
+    WebDir="if${i}_${Type}"
+    mkdir -p "$SMB/$Section" "$WEB/$WebDir"
+    touch "$SMB/${SECTIONS[$i]}/Anleitung.txt"
+    touch "$SMB/${SECTIONS[$i]}/Inhalt.txt"
+
+    # create files for each section
+    # Types: Background Wetter Ticker SlideShow Uhr Webseite Newsfeed
+    case "$Type" in
+      "Background")
+      ;;
+      "Wetter")
+      ;;
+      "Ticker")
+      ;;
+      "SlideShow")
+      ;;
+      "Uhr")
+      ;;
+      "Webseite")
+      ;;
+      "Newsfeed")
+      ;;
+    esac
+  done
+}
+
+remove_layout() {
+  for i in ${!SECTIONS[@]}; do
+    rm -rf "$SMB/${SECTIONS[$i]}" "$WEB/${SECTIONS[$i]}"
+  done
+  SECTIONS=""
+  TYPES=""
+}
+
+# read_value "file.ini" "section" "key" "default"
+read_value() {
+  file="$1"
+  section="$2"
+  key="$3"
+  value="$4"
+  found="0"
+  while IFS=$'=' read var val; do
+    if [[ $var == \[* ]]; then
+      v=`echo "$var"|tr -d "[]"|grep -v '^#'`
+      if [ "x$section" = "x$v" ]; then
+        found="1"
+      else
+        found="0"
+      fi
+    fi
+    if [[ $val ]]; then
+      if [ "x$found" = "x1" -a $key = $var ]; then
+        echo "$val"
+        return
+      fi
+    fi
+  done < "$file"
+  # default value
+  echo "$value"
+}
+
+# file was created @ $SMB
+handle_create() {
+  fullpath="$1"
+  directory="$2"
+  basefile="$3"
+
+  log "handle_create file($basefile) dir($directory) orig($fullpath)"
+
+  # special file "Layout.dsb"
+  if [ "${basefile}" = "layout.dsb" ]; then
+    cat "$fullpath" | dos2unix > "$CACHE/$basefile"
+    read_layout "$CACHE/$basefile"
+    # rm -f "$CACHE/$basefile"
+    return
+  fi
+}
+
+# file was removed in $SMB
+handle_delete() {
+  fullpath="$1"
+  directory="$2"
+  basefile="$3"
+
+  log "handle_delete file($basefile) dir($directory) orig($fullpath)"
+
+  # special file "Layout.dsb"
+  if [ "${basefile}" = "layout.dsb" ]; then
+    remove_layout
+    return
+  fi
+}
+
+# some error checking and initializing
+test -z $5 && error "Need 5 parameter!"
+startup
+
+# globals arrays for the layout
+declare -A "SECTIONS" "TYPES"
+
+# start inotifywait and put in background
+inotifywait --monitor --recursive \
+  --event create,close_write,delete,moved_to,moved_from \
+  --format "|%w%f|%e|" "$SMB" > "$FIFO" 2>&1 &
+INOTIFY_PID=$?
+
+# big loop, which starts things on some events
+waiting="yes"
+while read line; do
+
+  # wait for inotify to be ready
+  if [ "$waiting" = "yes" ]; then
+    test "$line" = "Watches established." || continue
+    waiting="no"
+
+    # touch all files in smb root (force reading them)
+    for i in $SMB/*; do
+      test -f "$i" && touch "$i"
+    done
+    continue
+  fi
+
+  # thats the real input now
+  fullpath=`echo $line|cut -d'|' -f2`
+  event=`echo $line|cut -d'|' -f3`
+
+  # remove $SMB prefix
+  # /home/dsb/dsb1/path/file.txt -> path/file.txt
+  lc_filename=${fullpath#$SMB/}
+
+  # we need a name, if there is none, we can't do anything...
+  test "x$lc_filename" = "x" && continue
+
+  # lower case directory and basefile without smb prefix
+  directory=`dirname "${lc_filename,,}"`
+  basefile=`basename "${lc_filename,,}"`
+
+  # debugging:
+  # log "filename($filename) e($event)"
+  # log "directory($directory) basefile($basefile) e($event)"
+  # continue
+
+  # .files are ignored
+  [ "${basefile:0:1}" = "." ] && continue
+
+  # create / delete
+  case "$event" in
+    "CREATE")
+      handle_create "$fullpath" "$directory" "$basefile"
+    ;;
+    "CLOSE_WRITE,CLOSE")
+      handle_create "$fullpath" "$directory" "$basefile"
+    ;;
+    "MOVED_TO")
+      handle_create "$fullpath" "$directory" "$basefile"
+    ;;
+    "MOVED_FROM")
+      handle_delete "$fullpath" "$directory" "$basefile"
+    ;;
+    "DELETE")
+      handle_delete "$fullpath" "$directory" "$basefile"
+    ;;
+  esac
+done < "$FIFO"
