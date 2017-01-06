@@ -1,6 +1,10 @@
 #!/bin/bash
+#
 # dsb daemon written in shell
-# /TR 2015-12-XX
+#
+# ctime: 2015-12-18 /TR
+# mtime: 2015-12-27 /TR
+# version: 0.10
 #############################################
 
 SMB="$1"
@@ -14,8 +18,8 @@ LIBFILES="/var/lib/dsb"
 TEMPLATES="$LIBFILES/Templates"
 
 # time in seconds
-DSB_RELOAD_TIME="2"
-PDF_QUALITY="80"
+DSB_RELOAD_TIME="3"
+PDF_QUALITY="-h 1080"
 
 exec 1>>$LOG
 exec 2>&1
@@ -91,216 +95,145 @@ clean_fifo() {
   fi
 }
 
-# -> direct ins web
+# <img> tag liste bauen...
+generate_img_list() {
+  echo -n > "$CacheDir/$File.img"
+  find "$CacheDir/$File.d" -name "*.png" | sort | while read f; do
+    md5=`echo $f|md5sum | cut -b1-32`
+    log ln -s -f "$f" "$WEB/if_$Id/$md5.png"
+    ln -s -f "$f" "$WEB/if_$Id/$md5.png"
+    echo "<img id=\"$md5\" src=\"if_$Id/$md5.png\" alt=\"\">" >> "$CacheDir/$File.img"
+  done
+}
+
+# -> direct ins web (jpg, gif usw)
 conv_direct() {
-  FileName="$1"
-  Dir=`dirname "$FileName"`
-  Base=`basename "$FileName"`
-
-  log "conv_direct($1)"
-  rm -rf "$Dir/$Base.d"
-  mkdir -p "$Dir/$Base.d"
-  ln -s "$FileName" "$Dir/$Base.d/$Base"
-  ls "$Dir/$Base.d" > "$FileName.txt"
-  # liste machen
-  find "$Dir/${Base}.d" -type l | sort > "$Dir/${Base}.txt"
+  log "conv_direct($File -> $CacheDir/$File.img"
+  rm -rf "$CacheDir/$File.d"
+  mkdir -p "$CacheDir/$File.d"
+  ln -s "$CacheDir/$File" "$CacheDir/$File.d/$File"
+  # <img> liste machen
+  echo -n > "$CacheDir/$File.img"
+  find "$CacheDir/$File.d" -name "*.$lcExt" | sort | while read f; do
+    md5=`echo $f|md5sum | cut -b1-32`
+    ln -s -f "$f" "$WEB/if_$Id/$md5.$lcExt"
+    echo "<img id=\"$md5\" src=\"if_$Id/$md5.$lcExt\" alt=\"\">" >> "$CacheDir/$File.img"
+  done
 }
 
+# -> direct ins web, aber video tag
 conv_video() {
-  FileName="$1"
-  Dir=`dirname "$FileName"`
-  Base=`basename "$FileName"`
-
-  log "conv_video($1)"
-  rm -rf "$Dir/$Base.d"
-  mkdir -p "$Dir/$Base.d"
-  ln -s "$FileName" "$Dir/$Base.d/$Base"
-  ls "$Dir/$Base.d" > "$FileName.txt"
-  # liste machen
-  find "$Dir/${Base}.d" -type l | sort > "$Dir/${Base}.txt"
+  log "conv_video -> $CacheDir/$File.video"
+  rm -rf "$CacheDir/$File.d"
+  mkdir -p "$CacheDir/$File.d"
+  ln -s "$CacheDir/$File" "$CacheDir/$File.d/$File"
+  # <video> liste machen
+  echo -n > "$CacheDir/$File.video"
+  find "$CacheDir/$File.d" -name "*.$lcExt" | sort | while read f; do
+    md5=`echo $f|md5sum | cut -b1-32`
+    ln -s -f "$f" "$WEB/if_$Id/$md5.$lcExt"
+    echo "<video id=\"$md5\" src=\"if_$Id/$md5.$lcExt\" controls></video>" >> "$CacheDir/$File.video"
+  done
 }
 
-# convert via Image Magick comvert tool
-conv_image() {
-  FileName="$1"
-  Dir=`dirname "$FileName"`
-  Base=`basename "$FileName"`
-
-  log "conv_image($1)"
-  rm -rf "$Dir/$Base.d"
-  mkdir -p "$Dir/$Base.d"
-  convert "$FileName" "$Dir/$Base.d/$Base.png"
-  # liste machen
-  find "$Dir/${Base}.d" -name "*.png" | sort > "$Dir/${Base}.txt"
+# convert image file via Image Magick comvert tool to png
+conv_images() {
+  log "conv_image($File -> $CacheDir/$File.img"
+  rm -rf "$CacheDir/$File.d"
+  mkdir -p "$CacheDir/$File.d"
+  convert "$CacheDir/$File" "$CacheDir/$File.d/$File.png"
+  generate_img_list
 }
 
 # pdf, xps, cbz, and epub -> png
-conv_pdf() {
-  FileName="$1"
-  Dir=`dirname "$FileName"`
-  Base=`basename "$FileName"`
-
-  log "conv_pdf($1) -> $Dir/${Base}.txt"
-  # /dsb1-cache/SlideShow #1/FILE.pdf.d/FILE_001.png ...FILE_00N.png
-  # altes CacheDir löschen und neues erstellen
-  rm -rf "$Dir/$Base.d"
-  mkdir -p "$Dir/$Base.d"
-  mutool draw -r $PDF_QUALITY -o "$Dir/${Base}.d/${Base}_%03d.png" "$FileName"
-  # liste machen
-  find "$Dir/${Base}.d" -name "*.png" | sort > "$Dir/${Base}.txt"
+conv_mutool() {
+  log "conv_mutool -> $CacheDir/$File.img"
+  rm -rf "$CacheDir/$File.d"
+  mkdir -p "$CacheDir/$File.d"
+  mutool draw $PDF_QUALITY -o "$CacheDir/$File.d/${File}_%03d.png" "$CacheDir/$File"
+  generate_img_list
 }
 
-# office -> pdf -> image
+# office -> pdf -> png
 # - wichtig, libreoffice einmal starten und pdf export qualität festlegen
 conv_office() {
-  FileName="$1"
-  Dir=`dirname "$FileName"`
-  Base=`basename "$FileName"`
-  BaseNoExt=${Base%.*}
-
-  log "conv_office($1)"
-  rm -rf "$Dir/$Base.d"
-  mkdir -p "$Dir/$Base.d"
-  cp "$FileName" "$Dir/$Base.d"
-  cd "$Dir/$Base.d"
-  # office nach pdf:
-  unoconv -f pdf --pipe="pipe$$" "$Base"
-  rm -f "$Base"
+  log "conv_office -> $CacheDir/$File.img"
+  rm -rf "$CacheDir/$File.d"
+  mkdir -p "$CacheDir/$File.d"
+  cp "$CacheDir/$File" "$CacheDir/$File.d"
+  # man muß in das verzeichnis gehen...
+  cd "$CacheDir/$File.d"
+  # office nach pdf: (lala.doc -> lala.pdf)
+  unoconv -f pdf --pipe="pipe$$" "$File"
+  rm -f "$File"
   # pdf nach png:
-  mutool draw -r $PDF_QUALITY -o "${Base}_%03d.png" "$BaseNoExt.pdf"
-  rm -f "$BaseNoExt.pdf"
-  # liste machen
-  find "$Dir/${Base}.d" -name "*.png" | sort > "$Dir/${Base}.txt"
+  FileNoExt=${File%.*}
+  mutool draw $PDF_QUALITY -o "${File}_%03d.png" "$FileNoExt.pdf"
+  rm -f "$FileNoExt.pdf"
   cd $CACHE
+  generate_img_list
 }
 
-# eine mediendatei in den cache schieben
+# eine mediendatei konvertieren und in den cache schieben
+# -> schon gesetzt: UserDir, CacheDir, File
 cache_file() {
-  Src="$1"
-  Dst="$2"
-  File="$3"
+  Ext=${File##*.}
+  lcExt=${Ext,,}
+  log "cache_file() UserDir=$UserDir, CacheDir=$CacheDir, File=$File, Ext=$Ext, lcExt=$lcExt"
 
   # overwrite old one...
-  cp -f "$Src/$File" "$Dst/$File"
+  cp -p -f "$UserDir/$File" "$CacheDir/$File"
 
-  # lower case filename
-  lcFile=${File,,}
+  # filetypes
+  OFFICE=(cwk dxf cdr cmx dbf wk1 wks 123 hwp mml xls xlw xlt docx xlsx pptx pxl psw ppt pps pot rtf doc dot vsd psd odt ods odp odb odg odf sxw stw sxc sxi sti sxd std sxm wb2 wmf wpd wps)
+  VIDEOS=(avi mp4 m4v ogm ogv ogg webm)
+  MUTOOL=(pdf xps cbz epub)
+  IMAGES=(pcx bmp)
+  DIRECT=(jpg jpeg png gif)
 
-  # motool draw
-  [ "${lcFile: -4}" = ".pdf" ] && conv_pdf "$Dst/$File"
-  [ "${lcFile: -4}" = ".xps" ] && conv_pdf "$Dst/$File"
-  [ "${lcFile: -4}" = ".cbz" ] && conv_pdf "$Dst/$File"
-  [ "${lcFile: -5}" = ".epub" ] && conv_pdf "$Dst/$File"
-
-  # libreoffice (nicht alle)
-  [ "${lcFile: -4}" = ".cwk" ] && conv_office "$Dst/$File" # AppleWorks word processing
-  [ "${lcFile: -4}" = ".dxf" ] && conv_office "$Dst/$File" # AutoCAD DXF
-  [ "${lcFile: -4}" = ".cdr" ] && conv_office "$Dst/$File" # CorelDRAW 6-X7
-  [ "${lcFile: -4}" = ".cmx" ] && conv_office "$Dst/$File" # CorelDRAW 6-X7
-  [ "${lcFile: -4}" = ".dbf" ] && conv_office "$Dst/$File" # dBase
-  [ "${lcFile: -4}" = ".wk1" ] && conv_office "$Dst/$File" # Lotus 1-2-3
-  [ "${lcFile: -4}" = ".wks" ] && conv_office "$Dst/$File" # Lotus 1-2-3
-  [ "${lcFile: -4}" = ".123" ] && conv_office "$Dst/$File" # Lotus 1-2-3
-  [ "${lcFile: -4}" = ".hwp" ] && conv_office "$Dst/$File" # Hangul WP 97
-  [ "${lcFile: -4}" = ".mml" ] && conv_office "$Dst/$File" # MathML
-  [ "${lcFile: -4}" = ".xls" ] && conv_office "$Dst/$File" # MS Excel 4/5/95/97–2003
-  [ "${lcFile: -4}" = ".xlw" ] && conv_office "$Dst/$File" # MS Excel 4/5/95/97–2003
-  [ "${lcFile: -4}" = ".xlt" ] && conv_office "$Dst/$File" # MS Excel 4/5/95/97–2003
-  [ "${lcFile: -5}" = ".docx" ] && conv_office "$Dst/$File" # MS Office 2007 Office Open XML
-  [ "${lcFile: -5}" = ".xlsx" ] && conv_office "$Dst/$File" # MS Office 2007 Office Open XML
-  [ "${lcFile: -5}" = ".pptx" ] && conv_office "$Dst/$File" # MS Office 2007 Office Open XML
-  [ "${lcFile: -4}" = ".pxl" ] && conv_office "$Dst/$File" # MS Pocket Excel
-  [ "${lcFile: -4}" = ".psw" ] && conv_office "$Dst/$File" # MS Pocket Word
-  [ "${lcFile: -4}" = ".ppt" ] && conv_office "$Dst/$File" # MS PowerPoint 97–2003
-  [ "${lcFile: -4}" = ".pps" ] && conv_office "$Dst/$File" # MS PowerPoint 97–2003
-  [ "${lcFile: -4}" = ".pot" ] && conv_office "$Dst/$File" # MS PowerPoint 97–2003
-  [ "${lcFile: -4}" = ".rtf" ] && conv_office "$Dst/$File" # MS RTF
-  [ "${lcFile: -4}" = ".doc" ] && conv_office "$Dst/$File" # MS Word 4/5/6.0/95/97–2003
-  [ "${lcFile: -4}" = ".dot" ] && conv_office "$Dst/$File" # MS Word 4/5/6.0/95/97–2003
-  [ "${lcFile: -4}" = ".vsd" ] && conv_office "$Dst/$File" # MS Visio
-  [ "${lcFile: -4}" = ".psd" ] && conv_office "$Dst/$File" # PhotoShop
-  [ "${lcFile: -4}" = ".odt" ] && conv_office "$Dst/$File" # OpenDocument Text
-  [ "${lcFile: -4}" = ".ods" ] && conv_office "$Dst/$File" # OpenDocument ...
-  [ "${lcFile: -4}" = ".odp" ] && conv_office "$Dst/$File" # OpenDocument
-  [ "${lcFile: -4}" = ".odb" ] && conv_office "$Dst/$File" # OpenDocument
-  [ "${lcFile: -4}" = ".odg" ] && conv_office "$Dst/$File" # OpenDocument
-  [ "${lcFile: -4}" = ".odf" ] && conv_office "$Dst/$File" # OpenDocument
-  [ "${lcFile: -4}" = ".sxw" ] && conv_office "$Dst/$File" # OpenOffice.org XML
-  [ "${lcFile: -4}" = ".stw" ] && conv_office "$Dst/$File" # OpenOffice.org XML
-  [ "${lcFile: -4}" = ".sxc" ] && conv_office "$Dst/$File" # OpenOffice.org XML
-  [ "${lcFile: -4}" = ".sxi" ] && conv_office "$Dst/$File" # OpenOffice.org XML
-  [ "${lcFile: -4}" = ".sti" ] && conv_office "$Dst/$File" # OpenOffice.org XML
-  [ "${lcFile: -4}" = ".sxd" ] && conv_office "$Dst/$File" # OpenOffice.org XML
-  [ "${lcFile: -4}" = ".std" ] && conv_office "$Dst/$File" # OpenOffice.org XML
-  [ "${lcFile: -4}" = ".sxm" ] && conv_office "$Dst/$File" # OpenOffice.org XML
-  [ "${lcFile: -4}" = ".wb2" ] && conv_office "$Dst/$File" # Quattro Pro 6.0
-  [ "${lcFile: -4}" = ".wmf" ] && conv_office "$Dst/$File" # Windows Meta File
-  [ "${lcFile: -4}" = ".wpd" ] && conv_office "$Dst/$File" # WordPerfect
-  [ "${lcFile: -4}" = ".wps" ] && conv_office "$Dst/$File" # WordPerfect Suite 2000/Office 1.0
-
-  # images, welche nicht alle browser können
-  [ "${lcFile: -4}" = ".pcx" ] && conv_image "$Dst/$File" # PCX
-  [ "${lcFile: -4}" = ".bmp" ] && conv_image "$Dst/$File"
-
-  # alle weiteren werden nicht konvertiert, nur anzeigen
-  [ "${lcFile: -4}" = ".jpg" ] &&  conv_direct "$Dst/$File"
-  [ "${lcFile: -4}" = ".png" ] &&  conv_direct "$Dst/$File"
-  [ "${lcFile: -4}" = ".gif" ] &&  conv_direct "$Dst/$File"
-
-  # video dateien
-  [ "${lcFile: -4}" = ".avi" ] &&  conv_video "$Dst/$File"
-  [ "${lcFile: -4}" = ".mp4" ] &&  conv_video "$Dst/$File"
-  [ "${lcFile: -4}" = ".m4v" ] &&  conv_video "$Dst/$File"
-  [ "${lcFile: -4}" = ".ogm" ] &&  conv_video "$Dst/$File"
-  [ "${lcFile: -4}" = ".ogv" ] &&  conv_video "$Dst/$File"
-  [ "${lcFile: -4}" = ".ogg" ] &&  conv_video "$Dst/$File"
-  [ "${lcFile: -5}" = ".webm" ] &&  conv_video "$Dst/$File"
+  for e in ${OFFICE[@]}; do
+    test "$lcExt" = "$e" && conv_office
+  done
+  for e in ${VIDEOS[@]}; do
+    test "$lcExt" = "$e" && conv_video
+  done
+  for e in ${MUTOOL[@]}; do
+    test "$lcExt" = "$e" && conv_mutool
+  done
+  for e in ${IMAGES[@]}; do
+    test "$lcExt" = "$e" && conv_images
+  done
+  for e in ${DIRECT[@]}; do
+    test "$lcExt" = "$e" && conv_direct
+  done
 }
 
 # Bilder und andere Mediendateien einlesen bzw. konvertieren
 read_mediafiles() {
   # log "read_mediafiles id($Id)"
+  mkdir -p "$CacheDir" "$WEB/if_$Id"
 
-  # UserDir = Files aus dem Samba Share
-  # CacheDir = dort wandeln wir um, *.txt wird ignoriert
-  UserDir="$SMB/$Section"
-  CacheDir="$CACHE/$Section"
-  mkdir -p "$CacheDir"
-
-  # xxx - ganz anders hier...
-
-  # cleanup old one, if there
-  echo -n > "$WEB/if_$Id.txt"
-  rm -rf "$WEB/if_$Id"
-  mkdir -p "$WEB/if_$Id"
-
-  # für alle Dateien im SlideShow Ordner, die nicht *.txt sind:
+  # für alle Dateien im SlideShow / Layout Ordner, die nicht *.txt sind:
+  echo -n > "$CACHE/if_$Id.media"
   find "$UserDir" -maxdepth 1 -type f \! -iname "*.txt" | sort | while read F; do
     File=`basename "$F"`
 
-    # noch nicht im cache, da rein...
-    # oder: cachefile ist älter als smbfile
-    test -f "$CacheDir/$File.txt" \
-    -o "$CacheDir/$File" -nt "$CacheDir/$File" \
-    || cache_file "$UserDir" "$CacheDir" "$File" "$Id"
+    # noch nicht im cache oder unterschiedliche größe
+    test ! -f "$CacheDir/$File" && cache_file
+    x1=`stat --printf "%s-%Y" "$UserDir/$File"`
+    x2=`stat --printf "%s-%Y" "$CacheDir/$File"`
+    # log "read_mediafiles x1=$x1 / x2=$x2"
+    test $x1 != "$x2" && cache_file
 
-    # log "read_cache($CacheDir/$File.txt)"
-    if [ -f "$CacheDir/$File.txt" ]; then
-      while read media; do
-        # mediafile ins web verlinken und .txt file damit erstellen
-        md5=`echo "$media" | md5sum | cut -b1-32`
-        # /var/cache/dsb/dsb1/SlideShow #1/bg04.jpg.d/bg04.jpg
-        ln -s -f "$media" "$WEB/if_$Id/$md5.png"
-        echo "if_$Id/$md5.png" >> "$WEB/if_$Id.txt"
-        # xxx <video> ... 
-        echo "<img id=\"$md5\" src=\"if_$Id/$md5.png\">" >> "$WEB/if_$Id.media"
-      done < "$CacheDir/$File.txt"
-    fi
+    # .img bzw .video files wurden beim konvertieren erstellt
+    test -f "$CacheDir/$File.img" && cat "$CacheDir/$File.img" >> "$CACHE/if_$Id.media"
+    test -f "$CacheDir/$File.video" && cat "$CacheDir/$File.video" >> "$CACHE/if_$Id.media"
   done
 }
 
 # Inhalt eines Templates lesen und zurück geben
 read_template_file() {
+  # log "read_template_file $1"
   File="$1"
 
   # log "find \"$UserDir\" -iname \"$File\""
@@ -311,24 +244,16 @@ read_template_file() {
 
 # -> setzt diese Variable: $LAYOUT
 read_template_files() {
-  # User Template
-  UserDir="$SMB/${SECTIONS[$Id]}"
-
   LAYOUT=`read_template_file "#Layout.txt"`
-  FILES=`echo "$LAYOUT" | grep -E '%\w*%'| cut -d% -f2`
+  FILES=`echo "$LAYOUT" | grep -E '%\w*%' | grep -vE '(DSB_|IFRAME_)' | cut -d% -f2`
 
   # alle %xyz% platzhalter ersetzen
   for x in $FILES; do
     # Ticker und Mediafiles sind anders!
-    test "$x" = "TICKER" && continue
-    test "$x" = "MEDIAFILES" && continue
-    test "$x" = "IFRAME_STYLES" && continue
-    test "$x" = "IFRAME_LINKS" && continue
-    Content=`read_template_file "#$x"`
+    Content=`read_template_file "#$x.txt"`
     LAYOUT=${LAYOUT/"%$x%"/"$Content"}
   done
 
-  # log "find \"$UserDir\" -iname \"$File\""
   find "$UserDir" -iname "$File" | while read f; do
     cat "$f"
   done
@@ -338,90 +263,68 @@ read_template_files() {
   LAYOUT=${LAYOUT/'%DSB_RELOAD%'/"$RELOAD"}
 }
 
-# "Ticker" / IO
+# Ticker bzw. Laufschrift
 generate_iframe_ticker() {
   read_template_files
 
   # set up ticker <li's>
-  if [ ! -z "$TICKER" ]; then
+  DSB_TICKER=`read_template_file "#Ticker.txt"`
+  if [ ! -z "$DSB_TICKER" ]; then
     T=""
     while read -r tline; do
       T="$T<li>$tline</li>"
-    done <<< "$TICKER"
-    LAYOUT=${LAYOUT/'%TICKER%'/"$T"}
+    done <<< "$DSB_TICKER"
+    LAYOUT=${LAYOUT/'%DSB_TICKER%'/"$T"}
   fi
-  echo "$LAYOUT" > "$WEB/if_$Id.html"
 }
 
-# "SlideShow"
-# - slideshow hat verzeichnis
-# - alle bilder darin werden angezeigt
-# - optionen via.?
+# SlideShow (Bilder und Videos)
 generate_iframe_slideshow() {
   read_template_files
-
-  echo -n > "$WEB/if_$Id.media"
   read_mediafiles
-  MEDIAFILES=`cat "$WEB/if_$Id.media"`
-  LAYOUT=${LAYOUT/'%MEDIAFILES%'/"$MEDIAFILES"}
-
-  echo "$LAYOUT" > "$WEB/if_$Id.html"
+  MEDIAFILES=`cat "$CACHE/if_$Id.media"`
+  LAYOUT=${LAYOUT/'%DSB_MEDIA%'/"$MEDIAFILES"}
 }
 
-# "Uhr" / IO
-generate_iframe_uhr() {
-  read_template_files
-  echo "$LAYOUT" > "$WEB/if_$Id.html"
-}
-
-# "Webseite" / IO
-generate_iframe_webseite() {
-  read_template_files
-  echo "$LAYOUT" > "$WEB/if_$Id.html"
-}
-
-# "Newsfeed" / IO
-generate_iframe_newsfeed() {
-  read_template_files
-  echo "$LAYOUT" > "$WEB/if_$Id.html"
-}
-
-# "Wetter" / IO
-generate_iframe_wetter() {
-  read_template_files
-  echo "$LAYOUT" > "$WEB/if_$Id.html"
-}
-
-# Frameset
+# das Frameset erzeugen
 generate_index() {
+  UserDir="$SMB/$Section"
+  CacheDir="$CACHE/$Section"
+
   log "Erstelle Index($Id), Type=$Type, Section=$Section"
 
+  # Update User Template from Samba Template
+  rsync -aqu "$SMB/Templates/$Type/" "$UserDir/"
   read_template_files
 
+  # style der iframes
   IFRAME_STYLES=`cat "$CACHE/iframe-styles"`
   IFRAME_LINKS=`cat "$CACHE/iframe-links"`
   LAYOUT=${LAYOUT/'%IFRAME_STYLES%'/"$IFRAME_STYLES"}
   LAYOUT=${LAYOUT/'%IFRAME_LINKS%'/"$IFRAME_LINKS"}
 
-  echo -n > "$WEB/if_$Id.media"
   read_mediafiles
-  MEDIAFILES=`cat "$WEB/if_$Id.media"`
-  LAYOUT=${LAYOUT/'%MEDIAFILES%'/"$MEDIAFILES"}
+  MEDIAFILES=`cat "$CACHE/if_$Id.media"`
+  LAYOUT=${LAYOUT/'%DSB_MEDIA%'/"$MEDIAFILES"}
 
-  echo "$LAYOUT" > "$WEB/indexX.html"
-
-  # generate md5sum of frame
-  cat "$WEB/indexX.html" | md5sum > "$WEB/indexX.html.md5"
+  # generate frameset and md5sum of it
+  echo "$LAYOUT" > "$WEB/if_$Id.html"
+  cat "$WEB/if_$Id.html" | md5sum | cut -b1-10 > "$WEB/if_$Id.html.md5"
+  ln -s -f "if_$Id.html" "$WEB/indexX.html"
 }
 
+# einen IFrame erzeugen
 generate_iframe() {
+  UserDir="$SMB/$Section"
+  CacheDir="$CACHE/$Section"
+
   # Update User Template from Samba Template
-  rsync -aqu "$SMB/Templates/$Type/" "$SMB/$Section/"
+  rsync -aqu "$SMB/Templates/$Type/" "$UserDir/"
 
   log "Erstelle Frame($Id), Type=$Type, Section=$Section"
   case "$Type" in
     "Wetter")
-      generate_iframe_wetter
+      read_template_files
       ;;
     "Ticker")
       generate_iframe_ticker
@@ -430,35 +333,32 @@ generate_iframe() {
       generate_iframe_slideshow
       ;;
     "Uhr")
-      generate_iframe_uhr
+      read_template_files
       ;;
     "Webseite")
-      generate_iframe_webseite
+      read_template_files
       ;;
     "Newsfeed")
-      generate_iframe_newsfeed
+      read_template_files
       ;;
   esac
 
-  if [ "$Type" != "Background" ]; then
-    STYLES[$Id]=`read_template_file "#Rahmen.txt"`
+  # generate iframe and md5sum of it
+  echo "$LAYOUT" > "$WEB/if_$Id.html"
+  cat "$WEB/if_$Id.html" | md5sum | cut -b1-10 > "$WEB/if_$Id.html.md5"
 
-    # style
-    echo "iframe#id$Id {
+  # style
+  STYLES[$Id]=`read_template_file "#Rahmen.txt"`
+  echo -e "iframe#id$Id {
   position: fixed;
   top: ${TOP[$Id]};
   left: ${LEFT[$Id]};
   width: ${WIDTH[$Id]};
   height: ${HEIGHT[$Id]};
-  ${STYLES[$Id]}
-}" >> "$CACHE/iframe-styles"
+  ${STYLES[$Id]} \n}\n\n" >> "$CACHE/iframe-styles"
 
-    echo "<iframe id=\"id$Id\" src=\"if_$Id.html\" scrolling=\"no\"></iframe>" \
-      >> "$CACHE/iframe-links"
-
-    # generate md5sum of frame
-    cat "$WEB/if_$Id.html" | md5sum > "$WEB/if_$Id.html.md5"
-  fi
+  echo "<iframe id=\"id$Id\" src=\"if_$Id.html\" scrolling=\"no\"></iframe>" \
+    >> "$CACHE/iframe-links"
 }
 
 generate_site() {
@@ -480,8 +380,9 @@ generate_site() {
 
   # 3) nur die iframes generieren
   for Id in ${!SECTIONS[@]}; do
-    Section="${SECTIONS[$Id]}"
     Type="${TYPES[$Id]}"
+    test "$Type" = "Background" && continue
+    Section="${SECTIONS[$Id]}"
     generate_iframe
   done
 
