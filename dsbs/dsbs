@@ -3,43 +3,31 @@
 #############################################
 # DSBS - Digital Signage Background Schedule
 #
-# ctime: 2016-08-25 /TR
-# mtime: 2016-08-25 /TR
-#
-# version: 0.3
+# ctime:   2016-08-25 /TR
+# mtime:   2016-08-26 /TR
+# version: 0.4
 #
 # -> run it via cron like this:
-# */1 * * * * /usr/sbin/dsbd "dsb1"
-# */1 * * * * /usr/sbin/dsbd "dsb-xxl"
+# */1 * * * * /usr/sbin/dsbs "dsb1"
+# */1 * * * * /usr/sbin/dsbs "dsb-xxl"
 #############################################
-
-SMB_PREFIX="/home/dsb"
-WEB_PREFIX="/var/www/html/dsb"
-
-# uncomment for testing @ ./$NAME/...
-SMB_PREFIX="."
-WEB_PREFIX="."
 
 if [ -z $1 ]; then
   echo "Need exact one parameter!"
   exit 1
 fi
 
-SMB="$SMB_PREFIX/$1/DS-Schedule.dsbs"
+SMB_PREFIX="/home/dsb"
+WEB_PREFIX="/var/www/html/dsb"
+USRGRP="dsb.dsb"
+
+SMB="$SMB_PREFIX/$1"
 WEB="$WEB_PREFIX/$1/status.txt"
 
-# check ini file @ smb share
-if [ ! -f "$SMB" ]; then
-  echo "$SMB not found!"
-  exit 2
-fi
-
-# check statusfile @ web share
+# extra checks
+[ ! -d "$SMB" ] && exit
 touch $WEB
-if [ "x$?" != "x0" ]; then
-  echo "Problem while creating $WEB !"
-  exit 3
-fi
+[ ! $? ] && exit
 
 # parse dsbs ini file, create 4 arrays
 read_dsbs() {
@@ -78,42 +66,55 @@ read_dsbs() {
   done < "$1"
 }
 
-wolcheck_etherwake() {
+wakeup_screens_etherwake() {
   NETDEVS=`cat /proc/net/dev | grep "eth"| cut -d: -f1`
   for i in ${!MACS[@]}; do
     str=${MACS[$i]}
     str=${str#*|}
     mac=${str:0:17}
     for dev in ${NETDEVS[@]}; do
-      echo $ETHERWAKE -i "$dev" "$mac"
+      $ETHERWAKE -i "$dev" "$mac"
+      $ETHERWAKE -i "$dev" "$mac"
     done
   done
 }
 
-wolcheck_wol() {
+wakeup_screens_wol() {
   for i in ${!MACS[@]}; do
     # 3=1|12:34:56:78:90:ef|DSB Lehrerzimmer
     str=${MACS[$i]}
     str=${str#*|}
     mac=${str:0:17}
-    echo wol $mac
+    wol $mac
+    wol $mac
   done
 }
 
 # ON|MAC|Beschreibung
 # [Macs]
-wolcheck() {
+wakeup_screens() {
+  export PATH="/sbin:/bin:/usr/sbin:/usr/bin"
+
+  # check layout link
+  old_layout=`readlink "$SMB/Layout.dsbd"`
+  echo "old_layout = $old_layout"
+  echo "cl_layout = $cl_layout"
+  if [ "x$cl_layout.dsbd" != "x$old_layout" ]; then
+    rm -f "$SMB/Layout.dsbd"
+    ln -s "$cl_layout.dsbd" "$SMB/Layout.dsbd"
+  fi
+
   # wol via ether-wake
   ETHERWAKE=`which ether-wake`
   if [ ! -z $ETHERWAKE ]; then
-    wolcheck_etherwake
+    wakeup_screens_etherwake
     return 0
   fi
 
   # wol via wol tool
   WOL=`which wol`
   if [ ! -z $WOL ]; then
-    wolcheck_wol
+    wakeup_screens_wol
     return 0
   fi
 }
@@ -127,7 +128,7 @@ LAYOUT=$cl_layout
 TIME=$cl_time
 DATE=$cl_date
 EOF
-  wolcheck
+  wakeup_screens
   exit
 }
 
@@ -149,16 +150,22 @@ LAYOUT=$cl_layout
 TIME=$cl_time
 DOW=$cl_dow
 EOF
-  wolcheck
+  wakeup_screens
   exit
 }
 
 # arrays @ schedule ini
 declare -A "WEEKPLAN" "OFFTIMES" "EVENTS" "MACS"
-exec 2>/dev/null
+
+# convert to unix format, leave it in the end for error checking...
+INI="/tmp/schedule.ini"
+exec 1> /tmp/dsbs.log
+exec 2> /tmp/dsbs.err
+cat "$SMB/DS-Schedule.dsbs" | dos2unix \
+  | iconv -f Latin1 -t utf8 > "$INI"
 
 # read arrays
-read_dsbs "$SMB"
+read_dsbs "$INI"
 
 # read current date, time and day of week
 DATETIME=`date +%u%Y%m%d%H%M`
