@@ -3,8 +3,8 @@
 # dsb daemon written in shell
 #
 # ctime: 2015-12-18 /TR
-# mtime: 2015-12-27 /TR
-# version: 0.10
+# mtime: 2016-01-04 /TR
+# version: 0.12
 #############################################
 
 SMB="$1"
@@ -18,7 +18,7 @@ LIBFILES="/var/lib/dsb"
 TEMPLATES="$LIBFILES/Templates"
 
 # time in seconds
-DSB_RELOAD_TIME="3"
+DSB_RELOAD_TIME="5"
 PDF_QUALITY="-r 110"
 
 exec 1>>$LOG
@@ -69,6 +69,13 @@ startup() {
 <item oor:path="/org.openoffice.Office.Common/Filter/PDF/Export"><prop oor:name="SelectPdfVersion" oor:op="fuse"><value>1</value></prop></item>
 <item oor:path="/org.openoffice.Office.Common/Filter/PDF/Export"><prop oor:name="Quality" oor:op="fuse"><value>90</value></prop></item>
 EOF
+
+  # Update Samba Templates (from System Templates)
+  if [ ! -d "$SMB/Templates" ]; then
+    log "Erstelle Samba Template Dateien..."
+    mkdir -p "$SMB/Templates"
+    rsync -aqu "$TEMPLATES/" "$SMB/Templates/"
+  fi
 
   cd $CACHE || error "Could not change to cachedir $CACHE"
 }
@@ -229,6 +236,13 @@ read_mediafiles() {
     test -f "$CacheDir/$File.img" && cat "$CacheDir/$File.img" >> "$CACHE/if_$Id.media"
     test -f "$CacheDir/$File.video" && cat "$CacheDir/$File.video" >> "$CACHE/if_$Id.media"
   done
+
+  MF=`cat "$CACHE/if_$Id.media" | wc -l`
+  if [ "x$MF" = "x1" ]; then
+    cat "$CACHE/if_$Id.media" \
+    | sed -e 's/id="\w*"/id="2"/g' >> "$CACHE/if_$Id.media"
+  fi
+  MEDIAFILES=`cat "$CACHE/if_$Id.media"`
 }
 
 # Inhalt eines Templates lesen und zurück geben
@@ -252,10 +266,6 @@ read_template_files() {
     # Ticker und Mediafiles sind anders!
     Content=`read_template_file "#$x.txt"`
     LAYOUT=${LAYOUT/"%$x%"/"$Content"}
-  done
-
-  find "$UserDir" -iname "$File" | while read f; do
-    cat "$f"
   done
 
   # reload kann überall drinnen sein
@@ -282,7 +292,6 @@ generate_iframe_ticker() {
 generate_iframe_slideshow() {
   read_template_files
   read_mediafiles
-  MEDIAFILES=`cat "$CACHE/if_$Id.media"`
   LAYOUT=${LAYOUT/'%DSB_MEDIA%'/"$MEDIAFILES"}
 }
 
@@ -304,7 +313,6 @@ generate_index() {
   LAYOUT=${LAYOUT/'%IFRAME_LINKS%'/"$IFRAME_LINKS"}
 
   read_mediafiles
-  MEDIAFILES=`cat "$CACHE/if_$Id.media"`
   LAYOUT=${LAYOUT/'%DSB_MEDIA%'/"$MEDIAFILES"}
 
   # generate frameset and md5sum of it
@@ -366,12 +374,8 @@ generate_site() {
   echo -n > "$CACHE/iframe-styles"
   echo -n > "$CACHE/iframe-links"
 
-  # 1a) Update directories
+  # 1) Update directories
   rsync -qau "$LIBFILES/js/" "$WEB/js/"
-
-  # 1b) Update Samba Templates (from System Templates)
-  mkdir -p "$SMB/Templates"
-  rsync -aqu "$TEMPLATES/" "$SMB/Templates/"
 
   # 2) reset FIFO Queue
   # wir bauen die ganze seite neu, alle anderen geänderten
@@ -457,6 +461,7 @@ handle_create() {
 
   # special file "Layout.dsb"
   if [ "${basefile}" = "layout.dsb" ]; then
+    LAYOUTFILE="$fullpath"
     log "Layout einlesen: [$directory/$basefile]"
     cat "$fullpath" | dos2unix > "$CACHE/$basefile"
     read_layout "$CACHE/$basefile"
@@ -489,9 +494,7 @@ handle_delete() {
     if [ "${directory}" = "$Section" ]; then
       log "Datei gelöscht: [$directory/$basefile]"
       remove_cached
-      for i in "$SMB"/*[dD][sS][bB]; do
-        test -f "$i" && touch "$i"
-      done
+      touch "$LAYOUTFILE"
     fi
   done
 }
