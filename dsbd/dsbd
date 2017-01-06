@@ -10,6 +10,7 @@ CACHE="$5"
 
 # javascript files and templates
 FILES="/var/lib/dsb"
+TYPES=("Background" "Wetter" "Ticker" "SlideShow" "Uhr" "Newsfeed")
 TEMPLATES="$SMB/Templates"
 
 exec 1>>$LOG
@@ -56,6 +57,19 @@ startup() {
 <item oor:path="/org.openoffice.Office.Common/Filter/PDF/Export"><prop oor:name="Quality" oor:op="fuse"><value>100</value></prop></item>
 EOF
 
+  # copy Templates to users smb share, so they can be modified
+  mkdir -p "$TEMPLATES"
+  for t in ${TYPES[@]}; do
+    if [ ! -f "$TEMPLATES/$t.html" ]; then
+      cat "$FILES/Templates/$t.html" \
+      | unix2dos > "$TEMPLATES/$t.html"
+    fi
+  done
+  if [ ! -f "$TEMPLATES/Anleitung.txt" ]; then
+    echo "Hier kann man die Templates ändern..." \
+    | unix2dos > "$TEMPLATES/Anleitung.txt"
+  fi
+
   cd $CACHE || error "Could not change to cachedir $CACHE"
 }
 
@@ -86,143 +100,19 @@ conv_office() {
   libreoffice --convert-to "pdf" --headless $*
 }
 
+conv_video() {
+  echo "lala"
+}
+
 generate_index() {
   file="$1"
   style="$2"
 cat <<EOF > $file
-<!DOCTYPE html>
-<html>
-<head>
-  <meta charset="utf-8">
-  <script type="text/javascript" src="js/jquery.min.js"></script>
-  <script type="text/javascript" src="js/dsb.js"></script>
-
-<style>
-html {
-  margin: 0; border: 0; padding: 0;
-  height: 100%;
-}
-
-body {
-  margin: 0; border: 0; padding: 0;
-  height: 100%;
-  font-family: sans-serif;
-  font-size: 2.5vw;
-  color: #000000;
-}
-
-iframe#links {
-  position: fixed;
-  top: 2%;
-  left: 1%;
-  width: 41%;
-  height: 90%;
-  /*background-color: silver;*/
-}
-
-iframe#rechts {
-  position: fixed;
-  top: 2%;
-  left: 58%;
-  width: 41%;
-  height: 44%;
-  /*background-color: red;*/
-}
-
-iframe#rechts2 {
-  position: fixed;
-  top: 49%;
-  left: 58%;
-  width: 41%;
-  height: 43%;
-  /*background-color: red;*/
-}
-
-iframe#ticker {
-  position: fixed;
-  top: 94%;
-  left: 1%;
-  width: 98%;
-  height: 5%;
-  border: solid 1px #000000;
-  /*background-color: blue;*/
-  background-color: rgba(33, 33, 33, 0.8);
-}
-
-iframe#uhr {
-  position:fixed;
-  top: 18%;
-  left: 43%;
-  width: 14%;
-  height: 27%;
-  border: 0;
-}
-
-iframe#wetter {
-  position: fixed;
-  top: 43%;
-  left: 43%;
-  width: 14%;
-  height: 49%;
-  /*background-color: green;*/
-  border: 0;
-  border-radius: 10px;                     /* "runde ecken" */
-  box-shadow: 5px 5px 5px #111111;         /* schatten */
-}
-
-.round {
-  border: solid 1px #000000;
-  border-radius: 10px;                     /* "runde ecken" */
-  box-shadow: 5px 5px 5px #111111;         /* schatten */
-  background-color: rgba(33, 33, 33, 0.2); /* hintergrund leicht angrauen... */
-}
-
-.shadow {
-  /* schatten für ticker text */
-  text-shadow:5px 5px 5px #cccccc;
-}
-
-.bg {
-  position: absolute;
-  z-index: -1;
-  top:0;
-  left:0;
-  width:100%;  /* Seitenverhältnis sollte passen! /TR */
-  height:100%; /* -> oder einen der beiden Werte raus nehmen... */
-}
-</style>
-
-</head>
-<body>
-
-<!-- hintergrund -->
-<div id="bg"></div>
-<script type="text/javascript">
- dsb_background("img_bg.txt", "bg");
-</script>
-
-<!--
-Platzhalter, hier kann man iframes "parken" ;)
-
-<iframe class="round" id="links"   src="if_feed.html"   frameborder="1" allowTransparency="true" scrolling="no"></iframe>
--->
-<iframe id="links"   src="if_links.html"   frameborder="0" scrolling="no" class="round"></iframe>
-<iframe id="rechts"  src="if_rechts.html"  frameborder="0" scrolling="no" class="round"></iframe>
-<iframe id="rechts2" src="if_feed.html"    frameborder="0" scrolling="no" class="round"></iframe>
-<iframe id="ticker"  src="if_ticker.html"  frameborder="0" scrolling="no" class="round"></iframe>
-<iframe id="uhr"     src="if_uhr.html"     frameborder="0" scrolling="no"></iframe>
-<iframe id="wetter"  src="if_wetter.html"  frameborder="0" scrolling="no"></iframe>
-
-<script type="text/javascript">
- dsb_checkreload("ticker.txt", 5);
-</script>
-
-</body>
-</html>
+...
 EOF
 }
 
-# read layout file and set the array SECTIONS and TYPES
+# read layout file and set the array SECTIONS + IFRAMES
 read_layout() {
   file="$1"
   i=0
@@ -234,42 +124,33 @@ read_layout() {
       test "x$x" = "x" && continue
       SECTIONS[$i]="$x"
       i=$((i+1))
+      #echo "S[$i]=$x"
     fi
     # type of last section found
     if [[ $var == Type=* ]]; then
       x=`echo "$var"|cut -b 6-`
       j=$((i-1))
-      TYPES[$j]="$x"
+      IFRAMES[$j]="$x"
+      #echo "T[$i]=$x"
     fi
   done < "$file"
 
   # create directories in $SMB and $WEB
   for i in ${!SECTIONS[@]}; do
-    Type="${TYPES[$i]}"
     Section="${SECTIONS[$i]}"
-    WebDir="if${i}_${Type}"
+    Iframe="${IFRAMES[$i]}"
+    WebDir="if${i}_${Iframe}"
     mkdir -p "$SMB/$Section" "$WEB/$WebDir"
+
+    # ...
     touch "$SMB/${SECTIONS[$i]}/Anleitung.txt"
     touch "$SMB/${SECTIONS[$i]}/Inhalt.txt"
 
     # create files for each section
     # Types: Background Wetter Ticker SlideShow Uhr Webseite Newsfeed
-    case "$Type" in
-      "Background")
-      ;;
-      "Wetter")
-      ;;
-      "Ticker")
-      ;;
-      "SlideShow")
-      ;;
-      "Uhr")
-      ;;
-      "Webseite")
-      ;;
-      "Newsfeed")
-      ;;
-    esac
+    for t in $TYPES; do
+      cat "$TEMPLATES/$t.html" | dos2unix > "$WEB/$WebDir/index.html"
+    done
   done
 }
 
@@ -320,7 +201,7 @@ handle_create() {
   if [ "${basefile}" = "layout.dsb" ]; then
     cat "$fullpath" | dos2unix > "$CACHE/$basefile"
     read_layout "$CACHE/$basefile"
-    # rm -f "$CACHE/$basefile"
+    rm -f "$CACHE/$basefile"
     return
   fi
 }
@@ -345,7 +226,7 @@ test -z $5 && error "Need 5 parameter!"
 startup
 
 # globals arrays for the layout
-declare -A "SECTIONS" "TYPES"
+declare -A "SECTIONS" "IFRAMES"
 
 # start inotifywait and put in background
 inotifywait --monitor --recursive \
