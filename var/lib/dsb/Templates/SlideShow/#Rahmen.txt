@@ -1,0 +1,12 @@
+
+/* Border */
+border: solid 1px #000;
+
+/* "runde ecken" */
+border-radius: 10px;
+
+/* schatten */
+box-shadow: 5px 5px 5px #000;
+
+/* hintergrund leicht angrauen... */
+background-color: rgba(33, 33, 33, 0.2);

@@ -1,0 +1,3 @@
+#!/bin/sh
+
+find ./Templates -iname '*.txt' -exec unix2dos "{}" \;

@@ -1,0 +1,52 @@
+--- jquery.vticker.js.orig	2015-12-25 20:29:49.000000000 +0100
++++ jquery.vticker.js	2015-12-25 21:14:40.683500719 +0100
+@@ -15,7 +15,8 @@
+ 		showItems: 3,
+ 		animation: '',
+ 		mousePause: true,
+-		isPaused: false
++		isPaused: false,
++		maxHeight: 33
+ 	};
+ 
+ 	var options = $.extend(defaults, options);
+@@ -26,9 +27,9 @@
+ 		var obj = obj2.children('ul');
+ 		
+ 	    	first = obj.children('li:first').clone(true);
+-    		obj.animate({top: '-=' + height + 'px'}, options.speed, function() {
++    		obj.animate({top: '-=' + height + 'vh'}, options.speed, function() {
+         		$(this).children('li:first').remove();
+-	        	$(this).css('top', '0px');
++	        	$(this).css('top', '0vh');
+         	});
+ 		
+ 		if(options.animation == 'fade') {
+@@ -43,23 +44,16 @@
+ 		var obj = $(this);
+ 		var maxHeight = 0;
+ 		var itempause = options.isPaused;
++		var maxHeight = options.maxHeight;
+ 
+ 		obj.css({overflow: 'hidden', position: 'relative'})
+-			.children('ul').css({position: 'absolute', margin: 0, padding: 0})
+-			.children('li').css({margin: 0, padding: 0});
+-
+-		obj.children('ul').children('li').each(function(){
+-
+-			if($(this).height() > maxHeight) {
+-				maxHeight = $(this).height();
+-			}
+-		});
++			.children('ul').css({position: 'absolute', margin: 0, padding: 0});
+ 
+ 		obj.children('ul').children('li').each(function() {
+-			$(this).height(maxHeight);
++			$(this).height(maxHeight + "vh");
+ 		});
+ 
+-		obj.height(maxHeight * options.showItems);
++		obj.height(maxHeight * options.showItems + "vh");
+ 		
+     		var interval = setInterval(function(){ moveUp(obj, maxHeight, itempause); }, options.pause);
+ 		

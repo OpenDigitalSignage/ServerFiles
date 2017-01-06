@@ -1,0 +1,22 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+  <title>DSB Ticker - Typing Text</title>
+  <meta charset="utf-8">
+  <script type="text/javascript" src="js/jquery.min.js"></script>
+  <script type="text/javascript" src="js/typed.js"></script>
+  <script type="text/javascript" src="js/dsb.js"></script>
+  <style>%STYLE%</style>
+</head>
+
+<body>
+  <div id="tickertext">%DSB_TICKER_TYPED%</div>
+  <span id="ticker"></span>
+  <script type="text/javascript">
+  %OPTIONEN%
+  %DSB_RELOAD%
+  </script>
+</body>
+
+</html>

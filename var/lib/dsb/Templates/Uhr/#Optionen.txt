@@ -1,0 +1,71 @@
+
+  var clock = new StationClock("clock");
+
+  /* hier kann man sich die Uhr anpassen: */
+  clock.body = 2;
+  clock.dial = 2;
+  clock.hourHand = 1;
+  clock.minuteHand = 1;
+  clock.secondHand = 2;
+  clock.boss = 0;
+  clock.minuteHandBehavoir = 2;
+  clock.secondHandBehavoir = 2;
+
+  animate();
+
+  /* dsb_scaler() zoomt die uhr... so das sie im frame maximiert ist /TR */
+  dsb_scaler("clock", 95);
+
+  function animate() {
+    clock.draw();
+    window.setTimeout("animate()", 100);
+  }
+
+/*
+// clock body (Uhrgehäuse)
+StationClock.NoBody         = 0;
+StationClock.SmallWhiteBody = 1;
+StationClock.RoundBody      = 2;
+StationClock.RoundGreenBody = 3;
+StationClock.SquareBody     = 4;
+
+// stroke dial (Zifferblatt)
+StationClock.NoDial               = 0;
+StationClock.GermanHourStrokeDial = 1;
+StationClock.GermanStrokeDial     = 2;
+StationClock.AustriaStrokeDial    = 3;
+StationClock.SwissStrokeDial      = 4;
+
+//clock hour hand (Stundenzeiger)
+StationClock.PointedHourHand = 1;
+StationClock.BarHourHand     = 2;
+StationClock.SwissHourHand   = 3;
+
+//clock minute hand (Minutenzeiger)
+StationClock.PointedMinuteHand = 1;
+StationClock.BarMinuteHand     = 2;
+StationClock.SwissMinuteHand   = 3;
+
+//clock second hand (Sekundenzeiger)
+StationClock.NoSecondHand            = 0;
+StationClock.BarSecondHand           = 1;
+StationClock.HoleShapedSecondHand    = 2;
+StationClock.NewHoleShapedSecondHand = 3;
+StationClock.SwissSecondHand         = 4;
+
+// clock boss (Zeigerabdeckung)
+StationClock.NoBoss    = 0;
+StationClock.BlackBoss = 1;
+StationClock.RedBoss   = 2;
+
+// minute hand behavoir
+StationClock.CreepingMinuteHand        = 0;
+StationClock.BouncingMinuteHand        = 1;
+StationClock.ElasticBouncingMinuteHand = 2;
+
+// second hand behavoir
+StationClock.CreepingSecondHand        = 0;
+StationClock.BouncingSecondHand        = 1;
+StationClock.ElasticBouncingSecondHand = 2;
+StationClock.OverhastySecondHand       = 3;
+*/

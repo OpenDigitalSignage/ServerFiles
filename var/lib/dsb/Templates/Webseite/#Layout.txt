@@ -1,0 +1,20 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+  <title>DSB Webseite</title>
+  <meta charset="utf-8">
+  <script type="text/javascript" src="js/jquery.min.js"></script>
+  <script type="text/javascript" src="js/dsb.js"></script>
+
+  <style>%STYLE%</style>
+</head>
+
+<body>
+ %OPTIONEN%
+ <script type="text/javascript">
+ %DSB_RELOAD%
+ </script>
+</body>
+
+</html>

@@ -1,0 +1,9 @@
+
+/* Border */
+border: 0;
+
+/* "runde ecken" */
+border-radius: 10px;
+
+/* schatten */
+box-shadow: 5px 5px 5px #000;

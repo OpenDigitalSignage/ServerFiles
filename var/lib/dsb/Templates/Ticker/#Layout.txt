@@ -1,0 +1,21 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+  <title>DSB Ticker</title>
+  <meta charset="utf-8">
+  <script type="text/javascript" src="js/jquery.min.js"></script>
+  <script type="text/javascript" src="js/jquery.marquee.min.js"></script>
+  <script type="text/javascript" src="js/dsb.js"></script>
+  <style>%STYLE%</style>
+</head>
+
+<body>
+  <ul id="ticker" class="marquee">%DSB_TICKER%</ul>
+  <script type="text/javascript">
+  %OPTIONEN%
+  %DSB_RELOAD%
+  </script>
+</body>
+
+</html>

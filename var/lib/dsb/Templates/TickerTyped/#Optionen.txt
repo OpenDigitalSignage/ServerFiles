@@ -1,0 +1,40 @@
+
+/**
+ * Typed Ticker, siehe: https://github.com/mattboldt/typed.js/blob/master/README.md
+ */
+
+$(document).ready(function() {
+  $("#ticker").typed({
+     stringsElement: $('#tickertext'),
+
+     // typing speed
+     typeSpeed: 50,
+
+     // time before typing starts
+     startDelay: 0,
+
+     // backspacing speed
+     backSpeed: 5,
+
+     // time before backspacing
+     backDelay: 2500,
+
+     // loop
+     loop: true,
+
+     // false = infinite
+     loopCount: false,
+
+     // show cursor
+     showCursor: true,
+
+     // character for cursor
+     cursorChar: "_",
+
+     // attribute to type (null == text)
+     attr: null,
+
+     // either html or text
+     contentType: 'html',
+  });
+});

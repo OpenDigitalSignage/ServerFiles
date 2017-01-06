@@ -1,0 +1,33 @@
+
+/**
+ * Ticker, siehe: http://www.givainc.com/labs/marquee_jquery_plugin.cfm
+ */
+
+$(document).ready(function() {
+  $("#ticker").marquee({
+
+    // the position of the marquee initially scroll (can be either "top" or "bottom")
+    yScroll: "bottom",
+
+    // the speed of to animate the initial dropdown of the messages
+    showSpeed: 2000,
+
+    // the speed of the scrolling (keep number low)
+    scrollSpeed: 12,
+
+    // the time to wait before showing the next message or scrolling current message
+    pauseSpeed: 4000,
+
+    // determine if we should pause on mouse hover
+    pauseOnHover: false,
+
+    // determine how many times to loop through the marquees (#'s < 0 = infinite)
+    loop: -1,
+
+    // the animition easing to use when showing a new marquee
+    fxEasingShow: "swing",
+
+    // the animition easing to use when showing a new marquee
+    fxEasingScroll: "linear",
+  });
+});

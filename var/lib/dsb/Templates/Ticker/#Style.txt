@@ -1,0 +1,34 @@
+
+body {
+  /* hier den Abstand zum Rand hin einstellen /TR */
+  margin: 10vh;
+
+  /* hier die Schriftart einstellen /TR */
+  font-family: sans-serif;
+
+  /* hier die Schriftgröße einstellen /TR */
+  font-size: 1.6vw;
+
+  /* hier die Schriftfarbe einstellen /TR */
+  color: lightblue;
+}
+
+ul.marquee {
+  display: block;
+  padding: 0;
+  margin: 0;
+  list-style: none;
+  position: relative;
+  overflow: hidden;
+  height: 90vh;
+}
+
+ul.marquee li {
+  position: absolute;
+  top: -900vh;
+  left: 0;
+  display: block;
+
+  /* keep all text on a single line */
+  white-space: nowrap;
+}

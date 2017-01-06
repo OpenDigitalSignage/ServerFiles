@@ -1,0 +1,19 @@
+
+html,body {
+ margin: 0; border: 10; padding: 0;
+}
+
+#wetter {
+  position: fixed;
+  width: 180px;
+  height: 354px;
+  overflow: hidden;
+}
+
+#button1, #button2 {
+  height: 106px;
+}
+
+#button3 {
+  height: 148px;
+}

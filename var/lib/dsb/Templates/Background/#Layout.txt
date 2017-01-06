@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+  <title>DSB FrameSet</title>
+  <meta charset="utf-8">
+  <script type="text/javascript" src="js/jquery.min.js"></script>
+  <script type="text/javascript" src="js/jquery.cycle.all.min.js"></script>
+  <script type="text/javascript" src="js/jquery.easing.js"></script>
+  <script type="text/javascript" src="js/dsb.js"></script>
+
+  <style>
+  %STYLE%
+  %IFRAME_STYLES%
+  </style>
+</head>
+
+<body>
+  %IFRAME_LINKS%
+
+  <div id="page">
+   <div id="content">
+    <div id="slideshow">
+    %DSB_MEDIA%
+    </div>
+   </div>
+  </div>
+
+  <script type="text/javascript">
+  %OPTIONEN%
+  %DSB_RELOAD%
+  </script>
+</body>
+
+</html>

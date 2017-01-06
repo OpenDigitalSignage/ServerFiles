@@ -1,0 +1,86 @@
+
+/**
+ * Mögliche Optionen für das Cycle PLugin, Referenz hier: http://jquery.malsup.com/cycle/options.html
+ *
+ * Hier die wichtigsten, welche für das Aussehen am DSB wichtig sein könnten:
+ * animIn:        null,  // properties that define how the slide animates in
+ * animOut:       null,  // properties that define how the slide animates out
+ * backwards:     false, // true to start slideshow at last slide and move backwards through the stack
+ * delay:         0,     // additional delay (in ms) for first transition (hint: can be negative)
+ * easeIn:        null,  // easing for "in" transition
+ * easeOut:       null,  // easing for "out" transition
+ * easing:        null,  // easing method for both in and out transitions
+ * randomizeEffects: 1,  // valid when multiple effects are used; true to make the effect sequence random
+ * rev:           0,     // causes animations to transition in reverse (for effects that support it such as scrollHorz/scrollVert/shuffle)
+ * shuffle:       null,  // coords for shuffle animation, ex: { top:15, left: 200 }
+ * speed:         1000,  // speed of the transition (any valid fx speed value)
+ * speedIn:       null,  // speed of the 'in' transition
+ * speedOut:      null,  // speed of the 'out' transition
+ * startingSlide: 0,     // zero-based index of the first slide to be displayed
+ * sync:          1,     // true if in/out transitions should occur simultaneously
+ * timeout:       4000,  // milliseconds between slide transitions (0 to disable auto advance)
+ */
+
+$(document).ready(function() {
+
+  /**
+   * hier kann man die Einstellungen der SlideShow sehr genau festlegen:
+   */
+  function fxSlideShow() {
+    $('#slideshow').cycle({
+
+      /* hier bitte fx_before so stehen lassen /TR */
+      before: fx_before,
+
+      /* milliseconds between slide transitions (0 to disable auto advance) */
+      timeout: 4000,
+
+      /* speed of the transition (any valid fx speed value) */
+      speed: 1700,
+
+      /**
+       * fx Funktionen, sie sind hier gut erklärt:
+       * http://jquery.malsup.com/cycle/begin.html
+       * http://jquery.malsup.com/cycle/int.html ... usw.
+       *
+       * none -> kein Effekt, einfach nur Bild für Bild
+       * all  -> alle Effekte
+       *
+       * scrollUp, scrollDown, scrollLeft, scrollRight, scrollHorz, scrollVert
+       * slideX, slideY
+       * shuffle, turnUp, turnDown, turnLeft, turnRight
+       * zoom, fadeZoom, fadeout
+       * blindX, blindY, blindZ
+       * growX, growY
+       * curtainX, curtainY
+       * toss, wipe, cover, uncover
+       *
+       * man kann auch mehrere angeben, zum Beispiel: 'zoom,fadeZoom,fadeout'
+       */
+      fx: 'fade',
+
+      /**
+       * easing method for both in and out transitions:
+       *
+       * linear
+       * swing
+       * easeInQuad easeOutQuad easeInOutQuad
+       * easeInCubic easeOutCubic easeInOutCubic
+       * easeInQuart easeOutQuart easeInOutQuart
+       * easeInQuint easeOutQuint easeInOutQuint
+       * easeInExpo easeOutExpo easeInOutExpo
+       * easeInSine easeOutSine easeInOutSine
+       * easeInCirc easeOutCirc easeInOutCirc
+       * easeInElastic easeOutElastic easeInOutElastic
+       * easeInBack easeOutBack easeInOutBack
+       * easeInBounce easeOutBounce easeInOutBounce
+       *
+       * Beispiele sind hier gut erklärt:
+       * https://jqueryui.com/resources/demos/effect/easing.html
+       */
+      // easing: 'easeOutBack',
+    });
+  }
+
+  dsb_slideshow(fxSlideShow, 100);
+});

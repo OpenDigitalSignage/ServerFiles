@@ -1,0 +1,3 @@
+
+/* die Uhr bekommt nix weiter drum herum... */
+border: 0;

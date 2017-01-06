@@ -1,0 +1,21 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+  <title>DSB Ticker - Scrolling</title>
+  <meta charset="utf-8">
+  <script type="text/javascript" src="js/jquery.min.js"></script>
+  <script type="text/javascript" src="js/jquery.marquee2.min.js"></script>
+  <script type="text/javascript" src="js/dsb.js"></script>
+  <style>%STYLE%</style>
+</head>
+
+<body>
+  <div id="ticker" class="marquee">%DSB_TICKER_SCROLLING%</div>
+  <script type="text/javascript">
+  %OPTIONEN%
+  %DSB_RELOAD%
+  </script>
+</body>
+
+</html>

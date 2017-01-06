@@ -1,0 +1,44 @@
+
+body {
+  font-family: Tahoma, Genevam, sans-serif;
+
+  /* kommt auf den ticker an, hier die Schriftgröße anpassen /TR */
+  font-size: 4vh;
+}
+
+/* sonst werden die links unterstrichen */
+a {
+  /* Schriftfarbe der Links /TR */
+  color: #000;
+
+  text-decoration: none;
+}
+
+.rssHeader {
+  font-weight: bold;
+  margin: 0.5vh;
+  padding: 1vh;
+
+  border: 1px solid #000;
+  border-radius: 6px;
+  background-color: rgba(203, 203, 203, 0.5);
+}
+
+#news li {
+  margin: 0.5vh;
+  padding: 0.5vh;
+}
+
+#news .odd {
+  border: 1px solid #000;
+  border-radius: 6px;
+  background-color: rgba(233, 203, 233, 0.6);
+  overflow: hidden;
+}
+
+#news .even {
+  border: 1px solid #000;
+  border-radius: 6px;
+  background-color: rgba(233, 233, 203, 0.6);
+  overflow: hidden;
+}

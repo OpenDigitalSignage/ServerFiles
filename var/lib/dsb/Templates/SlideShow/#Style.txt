@@ -1,0 +1,13 @@
+
+html,body {
+  margin: 0; border: 0; padding: 0;
+}
+
+#slideshow {
+  // border: 1px solid;
+}
+
+img, video {
+  border: 1px solid;
+  border-radius: 5px;
+}

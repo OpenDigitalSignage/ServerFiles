@@ -1,0 +1,17 @@
+
+<!--
+Hier kann man frei HTML hinein schreiben... /TR
+
+Wenn man nur die Inhalt einer anderen Seite mächte, macht man einen <iframe> auf:
+<iframe src="http://die-seite-hier.de" scrolling="no" style="border:none"></iframe>
+
+-->
+
+<iframe id="webseite" src="http://lala.de" scrolling="no" style="border:none"></iframe>
+
+
+<!--
+<script type="text/javascript">
+  dsb_scaler("webseite", 88);
+</script>
+-->

@@ -1,0 +1,24 @@
+<!--
+ /TR
+
+ Hier bauen: http://www.wetter.com/apps_und_mehr/website/wetterbutton/
+ und dann einfügen:
+ -->
+
+<!-- wetter.com button 180x150-->                                                                                                                                                                        
+<div id="wettercom-button-16060b80980a034039ece2710dbb838c">
+  <link id="wettercom-css" href="http://www.wetter.com/css/woys3.1.css?116510,16060b80980a034039ece2710dbb838c" rel="stylesheet" type="text/css" />
+  <div id="wettercom-title">
+    <a id="wettercom-citylink" href="http://www.wetter.com/wetter_aktuell/wettervorhersage/3_tagesvorhersage/?id=DE0002894" title="Wetter Finsterwalde" target="_blank">Wetter Finsterwalde</a>
+  </div>
+  <div id="wettercom-woys-16060b80980a034039ece2710dbb838c"></div>                                                                                                                                       
+    <div id="wettercom-brand">                                                                                                                                                                           
+  <a id="wettercom-link" href="http://www.wetter.com" target="_blank">
+    <span id="wettercom-more">mehr Wetter auf </span>
+    <img id="wettercom-logo" src="http://www.wetter.com/img/websitetools/woys/logo.png" alt="wetter.com" title="wetter.com" />
+  </a>                                                                                                                                                                                                   
+</div>  <div id="wettercom-clear">                                                                                                                                                                       
+    <script type="text/javascript" src="http://www.wetter.com/js/woys3.1.js?116510,16060b80980a034039ece2710dbb838c"></script>
+  </div>                                                                                                                                                                                                 
+</div>
+<!-- wetter.com button 180x150-->

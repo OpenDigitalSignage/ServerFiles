@@ -1,0 +1,18 @@
+
+body {
+  /* hier den Abstand zum Rand hin einstellen /TR */
+  margin: 10vh;
+
+  /* hier die Schriftart einstellen /TR */
+  font-family: sans-serif;
+
+  /* hier die Schriftgröße einstellen /TR */
+  font-size: 1.6vw;
+
+  /* hier die Schriftfarbe einstellen /TR */
+  color: lightblue;
+}
+
+#tickertext {
+  display: none;
+}
