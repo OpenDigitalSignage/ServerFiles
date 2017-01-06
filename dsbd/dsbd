@@ -3,8 +3,8 @@
 # dsb daemon written in shell
 #
 # ctime: 2015-12-18 /TR
-# mtime: 2016-01-11 /TR
-# version: 0.15
+# mtime: 2016-01-19 /TR
+# version: 0.16
 #############################################
 
 SMB="$1"
@@ -282,11 +282,17 @@ generate_iframe_ticker() {
   # set up ticker <li's>
   DSB_TICKER=`read_template_file "#Ticker.txt"`
   if [ ! -z "$DSB_TICKER" ]; then
-    T=""
+    TL=""
+    TT=""
+    TS=""
     while read -r tline; do
-      T="$T<li>$tline</li>"
+      TL="$TL<li>$tline</li>"
+      TT="$TT<p>$tline</p>"
+      TS="$TS &nbsp; &#x2981; &nbsp; &#x2981; &nbsp; &#x2981; &nbsp; $tline"
     done <<< "$DSB_TICKER"
-    LAYOUT=${LAYOUT/'%DSB_TICKER%'/"$T"}
+    LAYOUT=${LAYOUT/'%DSB_TICKER%'/"$TL"}
+    LAYOUT=${LAYOUT/'%DSB_TICKER_TYPED%'/"$TT"}
+    LAYOUT=${LAYOUT/'%DSB_TICKER_SCROLLING%'/"$TS"}
   fi
 }
 
