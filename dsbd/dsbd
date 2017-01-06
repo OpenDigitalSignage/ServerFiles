@@ -14,8 +14,8 @@ FILES="/var/lib/dsb"
 TEMPLATES="$FILES/Templates"
 
 # time in seconds
-DSB_RELAOD_TIME="10"
-PDF_QUALITY="12"
+DSB_RELOAD_TIME="10"
+PDF_QUALITY="80"
 
 exec 1>>$LOG
 exec 2>&1
@@ -73,11 +73,29 @@ cleanup() {
 }
 
 # -> direct ins web
+conv_direct() {
+  FileName="$1"
+  Dir=`dirname "$FileName"`
+  Base=`basename "$FileName"`
+
+  log "conv_direct($1)"
+  rm -rf "$Dir/$Base.d"
+  mkdir -p "$Dir/$Base.d"
+  mv "$FileName" "$Dir/$Base.d"
+  ls "$Dir/$Base.d" > "$FileName.txt"
+}
+
+# convert via Image Magick comvert tool
 conv_image() {
-  File="$1"
+  FileName="$1"
+  Dir=`dirname "$FileName"`
+  Base=`basename "$FileName"`
+
   log "conv_image($1)"
-  convert $File "$File.png"
-  find . -iname "$File.png"|sort > "$File.txt"
+  rm -rf "$Dir/$Base.d"
+  mkdir -p "$Dir/$Base.d"
+  convert "$FileName" "$Dir/$Base.d/$FileName.png"
+  find "$Dir/${Base}.d" -name "*.png" | sort > "$Dir/${Base}.txt"
 }
 
 # pdf, xps, cbz, and epub -> png
@@ -87,7 +105,6 @@ conv_pdf() {
   Base=`basename "$FileName"`
 
   log "conv_pdf($1) -> $Dir/${Base}.txt"
-
   # /dsb1-cache/SlideShow #1/FILE.pdf.d/FILE_001.png ...FILE_00N.png
   # altes CacheDir löschen und neues erstellen
   rm -rf "$Dir/$Base.d"
@@ -105,12 +122,12 @@ conv_office() {
   BaseNoExt=${Base%.*}
 
   log "conv_office($1)"
-
   rm -rf "$Dir/$Base.d"
   mkdir -p "$Dir/$Base.d"
   cp "$FileName" "$Dir/$Base.d"
   cd "$Dir/$Base.d"
-  libreoffice --headless --convert-to "pdf" "$Base" >/dev/null
+  unoconv -f pdf --pipe="pipe$$" "$Base"
+  echo rm -f "$Base"
   rm -f "$Base"
   mutool draw -r $PDF_QUALITY -o "${Base}_%03d.png" "$BaseNoExt.pdf"
   rm -f "$BaseNoExt.pdf"
@@ -130,6 +147,12 @@ cache_file() {
 
   # lower case filename
   lcFile=${File,,}
+
+  # motool draw
+  [ "${lcFile: -4}" = ".pdf" ] && conv_pdf "$Dst/$File"
+  [ "${lcFile: -4}" = ".xps" ] && conv_pdf "$Dst/$File"
+  [ "${lcFile: -4}" = ".cbz" ] && conv_pdf "$Dst/$File"
+  [ "${lcFile: -5}" = ".epub" ] && conv_pdf "$Dst/$File"
 
   # libreoffice (nicht alle)
   [ "${lcFile: -4}" = ".cwk" ] && conv_office "$Dst/$File" # AppleWorks word processing
@@ -177,15 +200,8 @@ cache_file() {
   [ "${lcFile: -4}" = ".wpd" ] && conv_office "$Dst/$File" # WordPerfect
   [ "${lcFile: -4}" = ".wps" ] && conv_office "$Dst/$File" # WordPerfect Suite 2000/Office 1.0
 
-  # mutool draw
-  log "test ${lcFile:-4} = .pdf ... "
-  [ "${lcFile: -4}" = ".pdf" ] && conv_pdf "$Dst/$File"
-  [ "${lcFile: -4}" = ".xps" ] && conv_pdf "$Dst/$File"
-  [ "${lcFile: -4}" = ".cbz" ] && conv_pdf "$Dst/$File"
-  [ "${lcFile: -5}" = ".epub" ] && conv_pdf "$Dst/$File"
-
   # images
-  [ "${lcFile: -4}" = ".pcx" ] && conv_image "$Dst/$File" # PCX
+  # [ "${lcFile: -4}" = ".pcx" ] && conv_image "$Dst/$File" # PCX
 }
 
 # Bilder und andere Mediendateien einlesen bzw. konvertieren
@@ -216,10 +232,10 @@ read_mediafiles() {
     || cache_file "$UserDir" "$CacheDir" "$File" "$Id"
 
     log "read_cache($CacheDir/$File.txt)"
-    while read line; do
+    while read media; do
       # png ins web verlinken und .txt file damit erstellen
-      md5=`echo $line | md5sum | cut -b1-32`
-      ln -s -f "$line" "$WEB/if_$Id/$md5.png"
+      md5=`echo $media | md5sum | cut -b1-32`
+      ln -s -f "$media" "$WEB/if_$Id/$md5.png"
       echo "if_$Id/$md5.png" >> "$WEB/if_$Id.txt"
     done < "$CacheDir/$File.txt"
   done
@@ -260,10 +276,10 @@ read_template_file() {
 generate_iframe_ticker() {
   Id="$1"
 
-  STYLE=`read_template_file "$Id" "Style.txt"`
-  LAYOUT=`read_template_file "$Id" "Layout.txt"`
-  TICKER=`read_template_file "$Id" "Ticker.txt"`
-  OPTIONEN=`read_template_file "$Id" "Optionen.txt"`
+  STYLE=`read_template_file "$Id" "#Style.txt"`
+  LAYOUT=`read_template_file "$Id" "#Layout.txt"`
+  TICKER=`read_template_file "$Id" "#Ticker.txt"`
+  OPTIONEN=`read_template_file "$Id" "#Optionen.txt"`
 
   LAYOUT=${LAYOUT/'%STYLE%'/"$STYLE"}
   LAYOUT=${LAYOUT/'%OPTIONEN%'/"$OPTIONEN"}
@@ -273,8 +289,8 @@ generate_iframe_ticker() {
   done <<< "$TICKER"
   LAYOUT=${LAYOUT/'%TICKER%'/"$T"}
 
-  RELOAD="dsb_checkreload(\"if_$Id.html\", $DSB_RELAOD_TIME);"
-  RELOAD="$RELAOD /* `date` */ "
+  RELOAD="dsb_checkreload(\"if_$Id.html\", $DSB_RELOAD_TIME);"
+  RELOAD="$RELOAD /* `date` */ "
   LAYOUT=${LAYOUT/'%DSB_RELOAD%'/"$RELOAD"}
   echo "$LAYOUT" > "$WEB/if_$Id.html"
 }
@@ -286,9 +302,9 @@ generate_iframe_ticker() {
 generate_iframe_slideshow() {
   Id="$1"
 
-  STYLE=`read_template_file "$Id" "Style.txt"`
-  LAYOUT=`read_template_file "$Id" "Layout.txt"`
-  OPTIONEN=`read_template_file "$Id" "Optionen.txt"`
+  STYLE=`read_template_file "$Id" "#Style.txt"`
+  LAYOUT=`read_template_file "$Id" "#Layout.txt"`
+  OPTIONEN=`read_template_file "$Id" "#Optionen.txt"`
 
   read_mediafiles "$Id"
 
@@ -296,8 +312,8 @@ generate_iframe_slideshow() {
   LAYOUT=${LAYOUT/'%OPTIONEN%'/"$OPTIONEN"}
   LAYOUT=${LAYOUT/'%DSB_SLIDER%'/"\"if_$Id.txt\""}
 
-  RELOAD="dsb_checkreload(\"if_$Id.html\", $DSB_RELAOD_TIME);"
-  RELOAD="$RELAOD /* `date` */ "
+  RELOAD="dsb_checkreload(\"if_$Id.html\", $DSB_RELOAD_TIME);"
+  RELOAD="$RELOAD /* `date` */ "
   LAYOUT=${LAYOUT/'%DSB_RELOAD%'/"$RELOAD"}
   echo "$LAYOUT" > "$WEB/if_$Id.html"
 }
@@ -306,15 +322,15 @@ generate_iframe_slideshow() {
 generate_iframe_uhr() {
   Id="$1"
 
-  STYLE=`read_template_file "$Id" "Style.txt"`
-  LAYOUT=`read_template_file "$Id" "Layout.txt"`
-  OPTIONEN=`read_template_file "$Id" "Optionen.txt"`
+  STYLE=`read_template_file "$Id" "#Style.txt"`
+  LAYOUT=`read_template_file "$Id" "#Layout.txt"`
+  OPTIONEN=`read_template_file "$Id" "#Optionen.txt"`
 
   LAYOUT=${LAYOUT/'%STYLE%'/"$STYLE"}
   LAYOUT=${LAYOUT/'%OPTIONEN%'/"$OPTIONEN"}
 
-  RELOAD="dsb_checkreload(\"if_$Id.html\", $DSB_RELAOD_TIME);"
-  RELOAD="$RELAOD /* `date` */ "
+  RELOAD="dsb_checkreload(\"if_$Id.html\", $DSB_RELOAD_TIME);"
+  RELOAD="$RELOAD /* `date` */ "
   LAYOUT=${LAYOUT/'%DSB_RELOAD%'/"$RELOAD"}
   echo "$LAYOUT" > "$WEB/if_$Id.html"
 }
@@ -323,15 +339,15 @@ generate_iframe_uhr() {
 generate_iframe_webseite() {
   Id="$1"
 
-  STYLE=`read_template_file "$Id" "Style.txt"`
-  LAYOUT=`read_template_file "$Id" "Layout.txt"`
-  OPTIONEN=`read_template_file "$Id" "Optionen.txt"`
+  STYLE=`read_template_file "$Id" "#Style.txt"`
+  LAYOUT=`read_template_file "$Id" "#Layout.txt"`
+  OPTIONEN=`read_template_file "$Id" "#Optionen.txt"`
 
   LAYOUT=${LAYOUT/'%STYLE%'/"$STYLE"}
   LAYOUT=${LAYOUT/'%OPTIONEN%'/"$OPTIONEN"}
 
-  RELOAD="dsb_checkreload(\"if_$Id.html\", $DSB_RELAOD_TIME);"
-  RELOAD="$RELAOD /* `date` */ "
+  RELOAD="dsb_checkreload(\"if_$Id.html\", $DSB_RELOAD_TIME);"
+  RELOAD="$RELOAD /* `date` */ "
   LAYOUT=${LAYOUT/'%DSB_RELOAD%'/"$RELOAD"}
   echo "$LAYOUT" > "$WEB/if_$Id.html"
 }
@@ -340,15 +356,15 @@ generate_iframe_webseite() {
 generate_iframe_newsfeed() {
   Id="$1"
 
-  STYLE=`read_template_file "$Id" "Style.txt"`
-  LAYOUT=`read_template_file "$Id" "Layout.txt"`
-  OPTIONEN=`read_template_file "$Id" "Optionen.txt"`
+  STYLE=`read_template_file "$Id" "#Style.txt"`
+  LAYOUT=`read_template_file "$Id" "#Layout.txt"`
+  OPTIONEN=`read_template_file "$Id" "#Optionen.txt"`
 
   LAYOUT=${LAYOUT/'%STYLE%'/"$STYLE"}
   LAYOUT=${LAYOUT/'%OPTIONEN%'/"$OPTIONEN"}
 
-  RELOAD="dsb_checkreload(\"if_$Id.html\", $DSB_RELAOD_TIME);"
-  RELOAD="$RELAOD /* `date` */ "
+  RELOAD="dsb_checkreload(\"if_$Id.html\", $DSB_RELOAD_TIME);"
+  RELOAD="$RELOAD /* `date` */ "
   LAYOUT=${LAYOUT/'%DSB_RELOAD%'/"$RELOAD"}
   echo "$LAYOUT" > "$WEB/if_$Id.html"
 }
@@ -357,19 +373,19 @@ generate_iframe_newsfeed() {
 generate_iframe_wetter() {
   Id="$1"
 
-  STYLE=`read_template_file "$Id" "Style.txt"`
-  LAYOUT=`read_template_file "$Id" "Layout.txt"`
-  BUTTON1=`read_template_file "$Id" "Button1.txt"`
-  BUTTON2=`read_template_file "$Id" "Button2.txt"`
-  BUTTON3=`read_template_file "$Id" "Button3.txt"`
+  STYLE=`read_template_file "$Id" "#Style.txt"`
+  LAYOUT=`read_template_file "$Id" "#Layout.txt"`
+  BUTTON1=`read_template_file "$Id" "#Button1.txt"`
+  BUTTON2=`read_template_file "$Id" "#Button2.txt"`
+  BUTTON3=`read_template_file "$Id" "#Button3.txt"`
 
   LAYOUT=${LAYOUT/'%STYLE%'/"$STYLE"}
   LAYOUT=${LAYOUT/'%BUTTON1%'/"$BUTTON1"}
   LAYOUT=${LAYOUT/'%BUTTON2%'/"$BUTTON2"}
   LAYOUT=${LAYOUT/'%BUTTON3%'/"$BUTTON3"}
 
-  RELOAD="dsb_checkreload(\"if_$Id.html\", $DSB_RELAOD_TIME);"
-  RELOAD="$RELAOD /* `date` */ "
+  RELOAD="dsb_checkreload(\"if_$Id.html\", $DSB_RELOAD_TIME);"
+  RELOAD="$RELOAD /* `date` */ "
   LAYOUT=${LAYOUT/'%DSB_RELOAD%'/"$RELOAD"}
   echo "$LAYOUT" > "$WEB/if_$Id.html"
 }
@@ -378,8 +394,8 @@ generate_iframe_wetter() {
 generate_index() {
   Id="$1"
 
-  STYLE=`read_template_file "$Id" "Style.txt"`
-  LAYOUT=`read_template_file "$Id" "Layout.txt"`
+  STYLE=`read_template_file "$Id" "#Style.txt"`
+  LAYOUT=`read_template_file "$Id" "#Layout.txt"`
   IFRAME_STYLES=`cat "$CACHE/iframe-styles"`
   IFRAME_LINKS=`cat "$CACHE/iframe-links"`
 
@@ -387,8 +403,8 @@ generate_index() {
   LAYOUT=${LAYOUT/'%IFRAME_STYLES%'/"$IFRAME_STYLES"}
   LAYOUT=${LAYOUT/'%IFRAME_LINKS%'/"$IFRAME_LINKS"}
 
-  RELOAD="dsb_checkreload(\"indexX.html\", $DSB_RELAOD_TIME);"
-  RELOAD="$RELAOD /* `date` */ "
+  RELOAD="dsb_checkreload(\"indexX.html\", $DSB_RELOAD_TIME);"
+  RELOAD="$RELOAD /* `date` */ "
   LAYOUT=${LAYOUT/'%DSB_RELOAD%'/"$RELOAD"}
   echo "$LAYOUT" > "$WEB/indexX.html"
 }
@@ -424,7 +440,7 @@ generate_iframe() {
       ;;
   esac
 
-  STYLES[$Id]=`read_template_file "$Id" "Rahmen.txt"`
+  STYLES[$Id]=`read_template_file "$Id" "#Rahmen.txt"`
   if [ "$Type" != "Background" ]; then
     # style
     echo "iframe#id$Id {
@@ -446,6 +462,11 @@ generate_site() {
   mkdir -p "$SMB/Templates"
   echo -n > "$CACHE/iframe-styles"
   echo -n > "$CACHE/iframe-links"
+
+  # wir bauen die ganze seite neu, alle anderen geänderten
+  # files machen wir also indirekt mit!
+  # -> deshalb FIFO hier mal _leer_ machen...
+  test -n $FIFO || cat $FIFO > /dev/null
 
   # 1) update js directory
   rsync -qau "$FILES/js/" "$WEB/js/"
@@ -491,10 +512,20 @@ read_layout() {
 }
 
 remove_layout() {
+  log "remove_layout()"
   for i in ${!SECTIONS[@]}; do
-    rm -rf "$SMB/${SECTIONS[$i]}" "$WEB/${SECTIONS[$i]}"
+    s="${SECTIONS[$i]}"
+    unset SECTIONS[$i]
+    unset TYPES[$i]
+    unset LEFT[$i]
+    unset TOP[$i]
+    unset WIDTH[$i]
+    unset HEIGHT[$i]
+    echo "rm -rf $SMB/$s $WEB/$s $WEB/if_$i $WEB/if_$i.html" \
+      "$WEB/if_$i.txt $WEB/index.html $WEB/js/"
+    rm -rf "$SMB/$s" "$WEB/$s" "$WEB/if_$i" "$WEB/if_$i.html" \
+      "$WEB/if_$i.txt" "$WEB/index.html" "$WEB/js/"
   done
-  SECTIONS=""
 }
 
 # file was created @ $SMB
@@ -532,7 +563,6 @@ handle_delete() {
   # special file "Layout.dsb"
   if [ "${basefile}" = "layout.dsb" ]; then
     remove_layout
-    return
   fi
 
   # check if some section was modified
@@ -566,8 +596,8 @@ while read line; do
     test "$line" = "Watches established." || continue
     waiting="no"
 
-    # touch all files in smb root (force reading them)
-    for i in $SMB/*; do
+    # touch all dsb files in smb root (force reading them)
+    for i in "$SMB"/*[dD][sS][bB]; do
       test -f "$i" && touch "$i"
     done
     continue
@@ -579,22 +609,22 @@ while read line; do
 
   # remove $SMB prefix
   # /home/dsb/dsb1/path/file.txt -> path/file.txt
-  lc_filename=${fullpath#$SMB/}
+  filename=${fullpath#$SMB/}
 
   # we need a name, if there is none, we can't do anything...
-  test "x$lc_filename" = "x" && continue
+  test "x$filename" = "x" && continue
 
   # lower case directory and basefile without smb prefix
-  directory=`dirname "${lc_filename,,}"`
-  basefile=`basename "${lc_filename,,}"`
+  directory=`dirname "${filename,,}"`
+  basefile=`basename "${filename,,}"`
+
+  # .files are ignored
+  [ "${basefile:0:1}" = "." ] && continue
 
   # debugging:
   # log "filename($filename) e($event)"
   # log "directory($directory) basefile($basefile) e($event)"
   # continue
-
-  # .files are ignored
-  [ "${basefile:0:1}" = "." ] && continue
 
   # create / delete
   case "$event" in
