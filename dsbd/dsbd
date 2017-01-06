@@ -1,7 +1,8 @@
 #!/bin/bash
-# check for updates on the samba share "$SMB"
+# dsb daemon written in shell
+# /TR 2015-12-XX
+#############################################
 
-# /usr/bin/dsb-check /home/dsb/dsb2 /var/www/html/dsb2 /var/log/dsb2.log /var/run/dsb2.fifo /var/cache/dsb2
 SMB="$1"
 WEB="$2"
 LOG="$3"
@@ -10,8 +11,32 @@ CACHE="$5"
 
 # javascript files and templates
 FILES="/var/lib/dsb"
-TYPES=("Background" "Wetter" "Ticker" "SlideShow" "Uhr" "Newsfeed")
 TEMPLATES="$SMB/Templates"
+
+# "Background"
+# - Background sollte nur 1x vorkommen
+# - wird nicht als iframe generiert
+# - hat style für das frameset
+
+# "Wetter"
+# - wetter hat 3 buttons
+
+# "Ticker"
+# - ticker hat ticker.txt
+
+# "SlideShow"
+# - slideshow hat verzeichnis
+# - alle bilder darin werden angezeigt
+# - optionen via.?
+
+# "Uhr"
+# - hat auch optionen
+
+# "Webseite"
+# - nur eine webseite als option
+
+# "Newsfeed"
+# - einen feed und diverse einstellungen
 
 exec 1>>$LOG
 exec 2>&1
@@ -57,19 +82,7 @@ startup() {
 <item oor:path="/org.openoffice.Office.Common/Filter/PDF/Export"><prop oor:name="Quality" oor:op="fuse"><value>100</value></prop></item>
 EOF
 
-  # copy Templates to users smb share, so they can be modified
   mkdir -p "$TEMPLATES"
-  for t in ${TYPES[@]}; do
-    if [ ! -f "$TEMPLATES/$t.html" ]; then
-      cat "$FILES/Templates/$t.html" \
-      | unix2dos > "$TEMPLATES/$t.html"
-    fi
-  done
-  if [ ! -f "$TEMPLATES/Anleitung.txt" ]; then
-    echo "Hier kann man die Templates ändern..." \
-    | unix2dos > "$TEMPLATES/Anleitung.txt"
-  fi
-
   cd $CACHE || error "Could not change to cachedir $CACHE"
 }
 
@@ -105,53 +118,206 @@ conv_video() {
 }
 
 generate_index() {
-  file="$1"
-  style="$2"
-cat <<EOF > $file
-...
+  if_styles=`cat "$CACHE/iframe-styles"`
+  if_links=`cat "$CACHE/iframe-links"`
+  cat <<EOF > "$WEB/index.html"
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <script type="text/javascript" src="js/jquery.min.js"></script>
+  <script type="text/javascript" src="js/dsb.js"></script>
+
+  <style>
+  %STYLE%
+  $if_styles
+  </style>
+</head>
+
+<body>
+
+<!-- hier kommen die iframe tags rein -->
+$if_links
+
+<!-- hintergrund -->
+<div id="bg"></div>
+<script type="text/javascript">
+  dsb_background("images.txt", "bg");
+  dsb_checkreload("images.txt", 5);
+</script>
+
+</body>
+</html>
 EOF
 }
 
-# read layout file and set the array SECTIONS + IFRAMES
+# Inhalt eines Templates lesen und zurück geben
+read_template_file() {
+  SysDir="$1"
+  UserDir="$2"
+  File="$3"
+  Default="$4"
+
+  find "$UserDir" -iname "$File" | while read f; do
+    cat "$f"
+    echo "r1"
+    return 0
+  done
+
+  find "$SysDir" -iname "$File" | while read f; do
+    cat "$f"
+    echo "r2"
+    return 0
+  done
+
+  echo "r3"
+  echo "$Default"
+}
+
+# "Ticker"
+# - ticker hat ticker.txt
+
+# "SlideShow"
+# - slideshow hat verzeichnis
+# - alle bilder darin werden angezeigt
+# - optionen via.?
+
+# "Uhr"
+# - hat auch optionen
+
+# "Webseite"
+# - nur eine webseite als option
+
+# "Newsfeed"
+# - einen feed und diverse einstellungen
+generate_iframe_newsfeed() {
+  Id="$1"
+  Section="$2"
+
+  # System and User Template
+  Template="$TEMPLATES/Newsfeed"
+  UserTemplate="$SMB/$Section"
+  mkdir -p "$UserTemplate"
+
+  LAYOUT=`read_template_file  "$Template" "$UserTemplate" "Layout.txt" ""`
+  OPTIONEN=`read_template_file  "$Template" "$UserTemplate" "Optionen.txt" ""`
+  STYLE=`read_template_file   "$Template" "$UserTemplate" "Style.txt" ""`
+
+  UserDir="$SMB/$Section"
+  echo "$LAYOUT"   > "$UserDir/Layout.txt"
+  echo "$OPTIONEN" > "$UserDir/Optionen.txt"
+  echo "$STYLE"    > "$UserDir/Style.txt"
+
+  LAYOUT=${LAYOUT/'%STYLE%'/"$STYLE"}
+  LAYOUT=${LAYOUT/'%OPTIONEN%'/"$OPTIONEN"}
+  echo "$LAYOUT"  > "$UserDir/if_Wetter.txt"
+}
+
+# Type=Wetter Section="Wetter #1"
+generate_iframe_wetter() {
+  Id="$1"
+  Section="$2"
+
+  # System and User Template
+  Template="$TEMPLATES/Wetter"
+  UserTemplate="$SMB/$Section"
+  mkdir -p "$UserTemplate"
+
+  LAYOUT=`read_template_file  "$Template" "$UserTemplate" "Layout.txt" ""`
+  STYLE=`read_template_file   "$Template" "$UserTemplate" "Style.txt" ""`
+  BUTTON1=`read_template_file "$Template" "$UserTemplate" "Button1.txt" "Wetterbutton 1 nicht gesetzt!"`
+  BUTTON2=`read_template_file "$Template" "$UserTemplate" "Button2.txt" "Wetterbutton 2 nicht gesetzt!"`
+  BUTTON3=`read_template_file "$Template" "$UserTemplate" "Button3.txt" "Wetterbutton 3 nicht gesetzt!"`
+
+  UserDir="$SMB/$Section"
+  echo "$LAYOUT"  > "$UserDir/Layout.txt"
+  echo "$STYLE"   > "$UserDir/Style.txt"
+  echo "$BUTTON1" > "$UserDir/Button1.txt"
+  echo "$BUTTON2" > "$UserDir/Button2.txt"
+  echo "$BUTTON3" > "$UserDir/Button3.txt"
+
+  LAYOUT=${LAYOUT/'%STYLE%'/"$STYLE"}
+  LAYOUT=${LAYOUT/'%BUTTON1%'/"$BUTTON1"}
+  LAYOUT=${LAYOUT/'%BUTTON2%'/"$BUTTON2"}
+  LAYOUT=${LAYOUT/'%BUTTON3%'/"$BUTTON3"}
+  echo "$LAYOUT"  > "$UserDir/if_Wetter.txt"
+
+  echo "iframe#links {
+   position: fixed;
+   top: ${TOP[$id]}; left: ${LEFT[$id]};
+   width: ${WIDTH[$id]}; height: ${HEIGHT[$id]};
+  }" >> "$CACHE/iframe-styles"
+
+  # <iframe id="wetter" src="if_wetter.html" frameborder="0" scrolling="no"></iframe>
+  #echo -n > "$CACHE/iframe-links"
+  echo "<iframe id=\"id$id\" src=\"if_$id.html\" frameborder=\"0\" scrolling=\"no\"></iframe>" \
+    >> "$CACHE/iframe-links"
+}
+
+generate_iframe() {
+  id="$1"
+
+  # "Wetter #1"
+  Section="${SECTIONS[$id]}"
+
+  # Types: Background Wetter Ticker SlideShow Uhr Webseite Newsfeed
+  Type="${TYPES[$id]}"
+
+  case "$Type" in
+    "Wetter")
+      generate_iframe_wetter "$id" "$Section"
+      ;;
+    "Ticker1")
+      generate_iframe_ticker "$Section"
+      ;;
+    "SlideShow1")
+      generate_iframe_slideshow "$Section"
+      ;;
+    "Uhr1")
+      generate_iframe_uhr "$Section"
+      ;;
+    "Webseite1")
+      generate_iframe_webseite "$Section"
+      ;;
+    "Newsfeed1")
+      generate_iframe_newsfeed "$Section"
+      ;;
+  esac
+}
+
+# read layout file and set the array SECTIONS + TYPES
 read_layout() {
   file="$1"
-  i=0
+  i="-1"
   while IFS=$'' read var val; do
     # section found
     if [[ $var == \[* ]]; then
       # sectionen die mit '#' beginnen, ignorieren
       x=`echo "$var"|tr -d "[]"|grep -v '^#'`
       test "x$x" = "x" && continue
-      SECTIONS[$i]="$x"
       i=$((i+1))
-      #echo "S[$i]=$x"
+      SECTIONS[$i]="$x"
     fi
-    # type of last section found
-    if [[ $var == Type=* ]]; then
-      x=`echo "$var"|cut -b 6-`
-      j=$((i-1))
-      IFRAMES[$j]="$x"
-      #echo "T[$i]=$x"
-    fi
+    if [[ $var == Type=* ]]; then x=`echo "$var"|cut -b 6-`; TYPES[$i]="$x"; fi
+    if [[ $var == Left=* ]]; then x=`echo "$var"|cut -b 6-`; LEFT[$i]="$x"; fi
+    if [[ $var == Top=* ]]; then x=`echo "$var"|cut -b 5-`; TOP[$i]="$x"; fi
+    if [[ $var == Width=* ]]; then x=`echo "$var"|cut -b 7-`; WIDTH[$i]="$x"; fi
+    if [[ $var == height=* ]]; then x=`echo "$var"|cut -b 8-`; HEIGHT[$i]="$x"; fi
   done < "$file"
 
-  # create directories in $SMB and $WEB
+  # create directories / files in $SMB and $WEB
+  echo -n > "$CACHE/iframe-styles"
+  echo -n > "$CACHE/iframe-links"
   for i in ${!SECTIONS[@]}; do
-    Section="${SECTIONS[$i]}"
-    Iframe="${IFRAMES[$i]}"
-    WebDir="if${i}_${Iframe}"
-    mkdir -p "$SMB/$Section" "$WEB/$WebDir"
-
-    # ...
-    touch "$SMB/${SECTIONS[$i]}/Anleitung.txt"
-    touch "$SMB/${SECTIONS[$i]}/Inhalt.txt"
-
-    # create files for each section
-    # Types: Background Wetter Ticker SlideShow Uhr Webseite Newsfeed
-    for t in $TYPES; do
-      cat "$TEMPLATES/$t.html" | dos2unix > "$WEB/$WebDir/index.html"
-    done
+    # 1) nur die iframes generieren
+    generate_iframe $i
   done
+
+  # 2) index für die iframes generieren
+  generate_index
+  
+  # 3) cleanup
+  rm -f "$CACHE/iframe-*"
 }
 
 remove_layout() {
@@ -159,7 +325,6 @@ remove_layout() {
     rm -rf "$SMB/${SECTIONS[$i]}" "$WEB/${SECTIONS[$i]}"
   done
   SECTIONS=""
-  TYPES=""
 }
 
 # read_value "file.ini" "section" "key" "default"
@@ -226,7 +391,7 @@ test -z $5 && error "Need 5 parameter!"
 startup
 
 # globals arrays for the layout
-declare -A "SECTIONS" "IFRAMES"
+declare -A "SECTIONS" "TYPES" "LEFT" "TOP" "WIDTH" "HEIGHT"
 
 # start inotifywait and put in background
 inotifywait --monitor --recursive \
