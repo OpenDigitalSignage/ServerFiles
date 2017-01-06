@@ -20,6 +20,10 @@ PDF_QUALITY="80"
 exec 1>>$LOG
 exec 2>&1
 
+# fifo allso on fd 23
+exec 23<>${FIFO}
+FIFO_FD=23
+
 # log sth.
 log() {
   d=`date "+%Y-%m-%d %H:%M:%S"`
@@ -72,6 +76,16 @@ cleanup() {
   exit 0
 }
 
+# called, when we know all other updates do not need more work
+clean_fifo() {
+  while true; do
+    # no data @ pipe
+    read -t 0.01 -u $FIFO_FD -r ignored
+    test "$?" != "0" && break
+    echo "ignoring line: $ignored"
+  done
+}
+
 # -> direct ins web
 conv_direct() {
   FileName="$1"
@@ -81,8 +95,10 @@ conv_direct() {
   log "conv_direct($1)"
   rm -rf "$Dir/$Base.d"
   mkdir -p "$Dir/$Base.d"
-  mv "$FileName" "$Dir/$Base.d"
+  ln -s "$FileName" "$Dir/$Base.d/$Base"
   ls "$Dir/$Base.d" > "$FileName.txt"
+  # liste machen
+  find "$Dir/${Base}.d" -type l | sort > "$Dir/${Base}.txt"
 }
 
 # convert via Image Magick comvert tool
@@ -94,7 +110,8 @@ conv_image() {
   log "conv_image($1)"
   rm -rf "$Dir/$Base.d"
   mkdir -p "$Dir/$Base.d"
-  convert "$FileName" "$Dir/$Base.d/$FileName.png"
+  convert "$FileName" "$Dir/$Base.d/$Base.png"
+  # liste machen
   find "$Dir/${Base}.d" -name "*.png" | sort > "$Dir/${Base}.txt"
 }
 
@@ -110,6 +127,7 @@ conv_pdf() {
   rm -rf "$Dir/$Base.d"
   mkdir -p "$Dir/$Base.d"
   mutool draw -r $PDF_QUALITY -o "$Dir/${Base}.d/${Base}_%03d.png" "$FileName"
+  # liste machen
   find "$Dir/${Base}.d" -name "*.png" | sort > "$Dir/${Base}.txt"
 }
 
@@ -126,11 +144,13 @@ conv_office() {
   mkdir -p "$Dir/$Base.d"
   cp "$FileName" "$Dir/$Base.d"
   cd "$Dir/$Base.d"
+  # office nach pdf:
   unoconv -f pdf --pipe="pipe$$" "$Base"
-  echo rm -f "$Base"
   rm -f "$Base"
+  # pdf nach png:
   mutool draw -r $PDF_QUALITY -o "${Base}_%03d.png" "$BaseNoExt.pdf"
   rm -f "$BaseNoExt.pdf"
+  # liste machen
   find "$Dir/${Base}.d" -name "*.png" | sort > "$Dir/${Base}.txt"
   cd $CACHE
 }
@@ -140,7 +160,6 @@ cache_file() {
   Src="$1"
   Dst="$2"
   File="$3"
-  Id="$4"
 
   # overwrite old one...
   cp -f "$Src/$File" "$Dst/$File"
@@ -200,14 +219,27 @@ cache_file() {
   [ "${lcFile: -4}" = ".wpd" ] && conv_office "$Dst/$File" # WordPerfect
   [ "${lcFile: -4}" = ".wps" ] && conv_office "$Dst/$File" # WordPerfect Suite 2000/Office 1.0
 
-  # images
-  # [ "${lcFile: -4}" = ".pcx" ] && conv_image "$Dst/$File" # PCX
+  # images, welche nicht alle browser können
+  [ "${lcFile: -4}" = ".pcx" ] && conv_image "$Dst/$File" # PCX
+  [ "${lcFile: -4}" = ".bmp" ] && conv_image "$Dst/$File"
+
+  # alle weiteren werden nicht konvertiert, nur anzeigen
+  [ "${lcFile: -4}" = ".jpg" ] &&  conv_direct "$Dst/$File"
+  [ "${lcFile: -4}" = ".png" ] &&  conv_direct "$Dst/$File"
+  [ "${lcFile: -4}" = ".gif" ] &&  conv_direct "$Dst/$File"
+
+  # video dateien
+  [ "${lcFile: -4}" = ".avi" ] &&  conv_video "$Dst/$File"
+  [ "${lcFile: -4}" = ".mp4" ] &&  conv_video "$Dst/$File"
+  [ "${lcFile: -4}" = ".m4v" ] &&  conv_video "$Dst/$File"
+  [ "${lcFile: -4}" = ".ogm" ] &&  conv_video "$Dst/$File"
+  [ "${lcFile: -4}" = ".ogv" ] &&  conv_video "$Dst/$File"
+  [ "${lcFile: -4}" = ".ogg" ] &&  conv_video "$Dst/$File"
+  [ "${lcFile: -5}" = ".webm" ] &&  conv_video "$Dst/$File"
 }
 
 # Bilder und andere Mediendateien einlesen bzw. konvertieren
 read_mediafiles() {
-  Id="$1"
-
   log "read_mediafiles id($Id)"
 
   # UserDir = Files aus dem Samba Share
@@ -222,22 +254,25 @@ read_mediafiles() {
   mkdir -p "$WEB/if_$Id"
 
   # für alle Dateien im SlideShow Ordner, die nicht *.txt sind:
-  find "$UserDir" -type f \! -iname "*.txt" | while read F; do
+  find "$UserDir" -maxdepth 1 -type f \! -iname "*.txt" | while read F; do
     File=`basename "$F"`
 
     # noch nicht im cache, da rein...
     # oder: cachefile ist älter als smbfile
-    test -f "$CacheDir/$File" \
+    test -f "$CacheDir/$File.txt" \
     -o "$CacheDir/$File" -nt "$CacheDir/$File" \
     || cache_file "$UserDir" "$CacheDir" "$File" "$Id"
 
     log "read_cache($CacheDir/$File.txt)"
-    while read media; do
-      # png ins web verlinken und .txt file damit erstellen
-      md5=`echo $media | md5sum | cut -b1-32`
-      ln -s -f "$media" "$WEB/if_$Id/$md5.png"
-      echo "if_$Id/$md5.png" >> "$WEB/if_$Id.txt"
-    done < "$CacheDir/$File.txt"
+    if [ -f "$CacheDir/$File.txt" ]; then
+      while read media; do
+        # mediafile ins web verlinken und .txt file damit erstellen
+        md5=`echo "$media" | md5sum | cut -b1-32`
+        # /var/cache/dsb/dsb1/SlideShow #1/bg04.jpg.d/bg04.jpg
+        ln -s -f "$media" "$WEB/if_$Id/$md5.png"
+        echo "if_$Id/$md5.png" >> "$WEB/if_$Id.txt"
+      done < "$CacheDir/$File.txt"
+    fi
   done
 }
 
@@ -247,24 +282,10 @@ read_mediafiles() {
 # 2) SMB Template
 # 3) User Template
 read_template_file() {
-  Id="$1"
-  File="$2"
+  File="$1"
 
-  Type="${TYPES[$Id]}"
-  Section="${SECTIONS[$Id]}"
-
-  # System Template, SMB Template and User Template
-  SysDir="$TEMPLATES/$Type"
-  SMBDir="$SMB/Templates/$Type"
-  UserDir="$SMB/$Section"
-
-  # log "read_template Type=$Type / section=$Section / SysDir=$SysDir / SMBDir=$SMBDir / UserDir=$UserDir"
-
-  # Update Templates im Samba Share
-  rsync -aqu "$SysDir/" "$SMBDir/"
-
-  # Update User Templates im Samba Share
-  rsync -aqu "$SMBDir/" "$UserDir/"
+  # User Template
+  UserDir="$SMB/${SECTIONS[$Id]}"
 
   # log "find \"$UserDir\" -iname \"$File\""
   find "$UserDir" -iname "$File" | while read f; do
@@ -274,18 +295,16 @@ read_template_file() {
 
 # "Ticker" / IO
 generate_iframe_ticker() {
-  Id="$1"
-
-  STYLE=`read_template_file "$Id" "#Style.txt"`
-  LAYOUT=`read_template_file "$Id" "#Layout.txt"`
-  TICKER=`read_template_file "$Id" "#Ticker.txt"`
-  OPTIONEN=`read_template_file "$Id" "#Optionen.txt"`
+  STYLE=`read_template_file "#Style.txt"`
+  LAYOUT=`read_template_file "#Layout.txt"`
+  TICKER=`read_template_file "#Ticker.txt"`
+  OPTIONEN=`read_template_file "#Optionen.txt"`
 
   LAYOUT=${LAYOUT/'%STYLE%'/"$STYLE"}
   LAYOUT=${LAYOUT/'%OPTIONEN%'/"$OPTIONEN"}
   T=""
-  while IFS= read -r line; do
-    T="$T<li>$line</li>"
+  while IFS= read -r tline; do
+    T="$T<li>$tline</li>"
   done <<< "$TICKER"
   LAYOUT=${LAYOUT/'%TICKER%'/"$T"}
 
@@ -300,17 +319,15 @@ generate_iframe_ticker() {
 # - alle bilder darin werden angezeigt
 # - optionen via.?
 generate_iframe_slideshow() {
-  Id="$1"
+  STYLE=`read_template_file "#Style.txt"`
+  LAYOUT=`read_template_file "#Layout.txt"`
+  OPTIONEN=`read_template_file "#Optionen.txt"`
 
-  STYLE=`read_template_file "$Id" "#Style.txt"`
-  LAYOUT=`read_template_file "$Id" "#Layout.txt"`
-  OPTIONEN=`read_template_file "$Id" "#Optionen.txt"`
-
-  read_mediafiles "$Id"
+  read_mediafiles
 
   LAYOUT=${LAYOUT/'%STYLE%'/"$STYLE"}
   LAYOUT=${LAYOUT/'%OPTIONEN%'/"$OPTIONEN"}
-  LAYOUT=${LAYOUT/'%DSB_SLIDER%'/"\"if_$Id.txt\""}
+  LAYOUT=${LAYOUT/'%SLIDESHOW%'/"\"if_$Id.txt\""}
 
   RELOAD="dsb_checkreload(\"if_$Id.html\", $DSB_RELOAD_TIME);"
   RELOAD="$RELOAD /* `date` */ "
@@ -320,11 +337,9 @@ generate_iframe_slideshow() {
 
 # "Uhr" / IO
 generate_iframe_uhr() {
-  Id="$1"
-
-  STYLE=`read_template_file "$Id" "#Style.txt"`
-  LAYOUT=`read_template_file "$Id" "#Layout.txt"`
-  OPTIONEN=`read_template_file "$Id" "#Optionen.txt"`
+  STYLE=`read_template_file "#Style.txt"`
+  LAYOUT=`read_template_file "#Layout.txt"`
+  OPTIONEN=`read_template_file "#Optionen.txt"`
 
   LAYOUT=${LAYOUT/'%STYLE%'/"$STYLE"}
   LAYOUT=${LAYOUT/'%OPTIONEN%'/"$OPTIONEN"}
@@ -337,11 +352,9 @@ generate_iframe_uhr() {
 
 # "Webseite" / IO
 generate_iframe_webseite() {
-  Id="$1"
-
-  STYLE=`read_template_file "$Id" "#Style.txt"`
-  LAYOUT=`read_template_file "$Id" "#Layout.txt"`
-  OPTIONEN=`read_template_file "$Id" "#Optionen.txt"`
+  STYLE=`read_template_file "#Style.txt"`
+  LAYOUT=`read_template_file "#Layout.txt"`
+  OPTIONEN=`read_template_file "#Optionen.txt"`
 
   LAYOUT=${LAYOUT/'%STYLE%'/"$STYLE"}
   LAYOUT=${LAYOUT/'%OPTIONEN%'/"$OPTIONEN"}
@@ -354,11 +367,9 @@ generate_iframe_webseite() {
 
 # "Newsfeed" / IO
 generate_iframe_newsfeed() {
-  Id="$1"
-
-  STYLE=`read_template_file "$Id" "#Style.txt"`
-  LAYOUT=`read_template_file "$Id" "#Layout.txt"`
-  OPTIONEN=`read_template_file "$Id" "#Optionen.txt"`
+  STYLE=`read_template_file "#Style.txt"`
+  LAYOUT=`read_template_file "#Layout.txt"`
+  OPTIONEN=`read_template_file "#Optionen.txt"`
 
   LAYOUT=${LAYOUT/'%STYLE%'/"$STYLE"}
   LAYOUT=${LAYOUT/'%OPTIONEN%'/"$OPTIONEN"}
@@ -371,13 +382,11 @@ generate_iframe_newsfeed() {
 
 # "Wetter" / IO
 generate_iframe_wetter() {
-  Id="$1"
-
-  STYLE=`read_template_file "$Id" "#Style.txt"`
-  LAYOUT=`read_template_file "$Id" "#Layout.txt"`
-  BUTTON1=`read_template_file "$Id" "#Button1.txt"`
-  BUTTON2=`read_template_file "$Id" "#Button2.txt"`
-  BUTTON3=`read_template_file "$Id" "#Button3.txt"`
+  STYLE=`read_template_file "#Style.txt"`
+  LAYOUT=`read_template_file "#Layout.txt"`
+  BUTTON1=`read_template_file "#Button1.txt"`
+  BUTTON2=`read_template_file "#Button2.txt"`
+  BUTTON3=`read_template_file "#Button3.txt"`
 
   LAYOUT=${LAYOUT/'%STYLE%'/"$STYLE"}
   LAYOUT=${LAYOUT/'%BUTTON1%'/"$BUTTON1"}
@@ -392,16 +401,24 @@ generate_iframe_wetter() {
 
 # Frameset
 generate_index() {
-  Id="$1"
-
-  STYLE=`read_template_file "$Id" "#Style.txt"`
-  LAYOUT=`read_template_file "$Id" "#Layout.txt"`
+  STYLE=`read_template_file "#Style.txt"`
+  LAYOUT=`read_template_file "#Layout.txt"`
   IFRAME_STYLES=`cat "$CACHE/iframe-styles"`
   IFRAME_LINKS=`cat "$CACHE/iframe-links"`
 
   LAYOUT=${LAYOUT/'%STYLE%'/"$STYLE"}
   LAYOUT=${LAYOUT/'%IFRAME_STYLES%'/"$IFRAME_STYLES"}
   LAYOUT=${LAYOUT/'%IFRAME_LINKS%'/"$IFRAME_LINKS"}
+
+  # wenn zu wenig dateien, dann lassen wir nur die hintergrundfarbe
+  read_mediafiles
+  IndexImages=`cat "$WEB/if_$Id.txt"|  wc -l`
+  if [ "$IndexImages" -gt 2 ]; then
+    BACKGROUND="dsb_background(\"if_$Id.txt\", \"bg\");"
+  else
+    BACKGROUND=""
+  fi
+  LAYOUT=${LAYOUT/'%DSB_BACKGROUND%'/"$BACKGROUND"}
 
   RELOAD="dsb_checkreload(\"indexX.html\", $DSB_RELOAD_TIME);"
   RELOAD="$RELOAD /* `date` */ "
@@ -410,37 +427,32 @@ generate_index() {
 }
 
 generate_iframe() {
-  Id="$1"
-
-  # "Wetter #1"
-  Section="${SECTIONS[$Id]}"
-
-  # Types: Background Wetter Ticker SlideShow Uhr Webseite Newsfeed
-  Type="${TYPES[$Id]}"
+  # Update User Template from Samba Template
+  rsync -aqu "$SMB/Templates/$Type/" "$SMB/$Section/"
 
   log "generate_iframe() id=$Id / Section=$Section / Type=$Type"
   case "$Type" in
     "Wetter")
-      generate_iframe_wetter "$Id"
+      generate_iframe_wetter
       ;;
     "Ticker")
-      generate_iframe_ticker "$Id"
+      generate_iframe_ticker
       ;;
     "SlideShow")
-      generate_iframe_slideshow "$Id"
+      generate_iframe_slideshow
       ;;
     "Uhr")
-      generate_iframe_uhr "$Id"
+      generate_iframe_uhr
       ;;
     "Webseite")
-      generate_iframe_webseite "$Id"
+      generate_iframe_webseite
       ;;
     "Newsfeed")
-      generate_iframe_newsfeed "$Id"
+      generate_iframe_newsfeed
       ;;
   esac
 
-  STYLES[$Id]=`read_template_file "$Id" "#Rahmen.txt"`
+  STYLES[$Id]=`read_template_file "#Rahmen.txt"`
   if [ "$Type" != "Background" ]; then
     # style
     echo "iframe#id$Id {
@@ -459,32 +471,44 @@ generate_iframe() {
 
 generate_site() {
   # create directories / files in $SMB and $WEB
-  mkdir -p "$SMB/Templates"
   echo -n > "$CACHE/iframe-styles"
   echo -n > "$CACHE/iframe-links"
 
-  # wir bauen die ganze seite neu, alle anderen geänderten
-  # files machen wir also indirekt mit!
-  # -> deshalb FIFO hier mal _leer_ machen...
-  test -n $FIFO || cat $FIFO > /dev/null
-
-  # 1) update js directory
+  # 1a) Update directories
   rsync -qau "$FILES/js/" "$WEB/js/"
 
-  # 2) nur die iframes generieren
-  for i in ${!SECTIONS[@]}; do
-    generate_iframe $i
+  # 1b) Update Samba Templates (from System Templates)
+  mkdir -p "$SMB/Templates"
+  rsync -aqu "$TEMPLATES/" "$SMB/Templates/"
+
+  # 2) reset FIFO Queue
+  # wir bauen die ganze seite neu, alle anderen geänderten
+  # files machen wir also indirekt mit!
+  #clean_fifo
+
+  # "Wetter #1"
+  # -> Section="${SECTIONS[$Id]}"
+
+  # Types: Background Wetter Ticker SlideShow Uhr Webseite Newsfeed
+  # -> Type="${TYPES[$Id]}"
+
+  # 3) nur die iframes generieren
+  for Id in ${!SECTIONS[@]}; do
+    Section="${SECTIONS[$Id]}"
+    Type="${TYPES[$Id]}"
+    generate_iframe
   done
 
-  # 3) nun den index für die iframes generieren
-  for i in ${!SECTIONS[@]}; do
-    test "${TYPES[$i]}" = "Background" || continue
-    generate_index $i
+  # 4) nun den index für die iframes generieren
+  for Id in ${!SECTIONS[@]}; do
+    Type="${TYPES[$Id]}"
+    test "$Type" = "Background" || continue
+    Section="${SECTIONS[$Id]}"
+    generate_index
   done
 
   # 4) cleanup
   rm -f "$CACHE/"iframe-*
-
 }
 
 # read layout file and set up the arrays:
@@ -521,8 +545,6 @@ remove_layout() {
     unset TOP[$i]
     unset WIDTH[$i]
     unset HEIGHT[$i]
-    echo "rm -rf $SMB/$s $WEB/$s $WEB/if_$i $WEB/if_$i.html" \
-      "$WEB/if_$i.txt $WEB/index.html $WEB/js/"
     rm -rf "$SMB/$s" "$WEB/$s" "$WEB/if_$i" "$WEB/if_$i.html" \
       "$WEB/if_$i.txt" "$WEB/index.html" "$WEB/js/"
   done
@@ -541,6 +563,7 @@ handle_create() {
     cat "$fullpath" | dos2unix > "$CACHE/$basefile"
     read_layout "$CACHE/$basefile"
     rm -f "$CACHE/$basefile"
+    #clean_fifo
   fi
 
   # check if some section was modified
@@ -589,7 +612,7 @@ INOTIFY_PID=$?
 
 # big loop, which starts things on some events
 waiting="yes"
-while read line; do
+while IFS= read -u $FIFO_FD -r line; do
 
   # wait for inotify to be ready
   if [ "$waiting" = "yes" ]; then
@@ -644,4 +667,4 @@ while read line; do
       handle_delete "$fullpath" "$directory" "$basefile"
     ;;
   esac
-done < "$FIFO"
+done
