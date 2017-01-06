@@ -3,7 +3,7 @@
  * DSB Helper Functions
  *
  * ctime: 2015-04-27 /TR
- * mtime: 2016-01-04 /TR
+ * mtime: 2016-08-04 /TR
  */
 
 /* global debugging via console */
@@ -66,6 +66,20 @@ function dsb_checkreload(url, timeout) {
       // log("reload...")
       location.reload();
     }
+  }
+}
+/**************************************************************************/
+
+/**
+ * dsb_forcereload(seconds)
+ * - einzelnen frame neu laden, wenn anzahl seconds vorbei ist
+ *
+ * /TR 2016-08-04
+ */
+function dsb_forcereload(timeout) {
+  setInterval(reload_site, timeout * 1000);
+  function reload_site() {
+    location.reload();
   }
 }
 /**************************************************************************/
