@@ -11,32 +11,7 @@ CACHE="$5"
 
 # javascript files and templates
 FILES="/var/lib/dsb"
-TEMPLATES="$SMB/Templates"
-
-# "Background"
-# - Background sollte nur 1x vorkommen
-# - wird nicht als iframe generiert
-# - hat style für das frameset
-
-# "Wetter"
-# - wetter hat 3 buttons
-
-# "Ticker"
-# - ticker hat ticker.txt
-
-# "SlideShow"
-# - slideshow hat verzeichnis
-# - alle bilder darin werden angezeigt
-# - optionen via.?
-
-# "Uhr"
-# - hat auch optionen
-
-# "Webseite"
-# - nur eine webseite als option
-
-# "Newsfeed"
-# - einen feed und diverse einstellungen
+TEMPLATES="$FILES/Templates"
 
 exec 1>>$LOG
 exec 2>&1
@@ -82,7 +57,6 @@ startup() {
 <item oor:path="/org.openoffice.Office.Common/Filter/PDF/Export"><prop oor:name="Quality" oor:op="fuse"><value>100</value></prop></item>
 EOF
 
-  mkdir -p "$TEMPLATES"
   cd $CACHE || error "Could not change to cachedir $CACHE"
 }
 
@@ -117,141 +91,136 @@ conv_video() {
   echo "lala"
 }
 
-generate_index() {
-  if_styles=`cat "$CACHE/iframe-styles"`
-  if_links=`cat "$CACHE/iframe-links"`
-  cat <<EOF > "$WEB/index.html"
-<!DOCTYPE html>
-<html>
-<head>
-  <meta charset="utf-8">
-  <script type="text/javascript" src="js/jquery.min.js"></script>
-  <script type="text/javascript" src="js/dsb.js"></script>
-
-  <style>
-  %STYLE%
-  $if_styles
-  </style>
-</head>
-
-<body>
-
-<!-- hier kommen die iframe tags rein -->
-$if_links
-
-<!-- hintergrund -->
-<div id="bg"></div>
-<script type="text/javascript">
-  dsb_background("images.txt", "bg");
-  dsb_checkreload("images.txt", 5);
-</script>
-
-</body>
-</html>
-EOF
-}
-
 # Inhalt eines Templates lesen und zurück geben
+# Reihenfolge des einlesens:
+# 1) SystemTemplate @ /var/lib/dsb
+# 2) SMB Template
+# 3) User Template
 read_template_file() {
-  SysDir="$1"
-  UserDir="$2"
-  File="$3"
-  Default="$4"
+  Id="$1"
+  File="$2"
+  Value="$3"
+
+  Type="${TYPES[$id]}"
+  Section="${SECTIONS[$id]}"
+
+  # System Template, SMB Template and User Template
+  SysDir="$TEMPLATES/$Type"
+  SMBDir="$SMB/Templates/$Type"
+  UserDir="$SMB/$Section"
+
+  if [ ! -d "$SMBDir" ]; then
+    cp -r "$SysDir" "$SMBDir"
+  fi
+
+  if [ ! -d "$UserDir" ]; then
+    cp -r "$SMBDir" "$UserDir"
+  fi
 
   find "$UserDir" -iname "$File" | while read f; do
-    cat "$f"
-    echo "r1"
-    return 0
+    Value=`cat "$f"`
   done
 
-  find "$SysDir" -iname "$File" | while read f; do
-    cat "$f"
-    echo "r2"
-    return 0
-  done
+  echo "$Value"
+}
 
-  echo "r3"
-  echo "$Default"
+generate_index() {
+  Id="$1"
+
+  STYLE=`read_template_file "$id" "Style.txt" ""`
+  LAYOUT=`read_template_file "$id" "Layout.txt" ""`
+  IFRAME_STYLES=`cat "$CACHE/iframe-styles"`
+  IFRAME_LINKS=`cat "$CACHE/iframe-links"`
+
+  LAYOUT=${LAYOUT/'%STYLE%'/"$STYLE"}
+  LAYOUT=${LAYOUT/'%IFRAME_STYLES%'/"$IFRAME_STYLES"}
+  LAYOUT=${LAYOUT/'%IFRAME_LINKS%'/"$IFRAME_LINKS"}
+  echo "$LAYOUT" > "$WEB/index.html"
 }
 
 # "Ticker"
 # - ticker hat ticker.txt
+generate_iframe_ticker() {
+  Id="$1"
+
+  STYLE=`read_template_file "$id" "Style.txt" ""`
+  LAYOUT=`read_template_file "$id" "Layout.txt" ""`
+
+  LAYOUT=${LAYOUT/'%STYLE%'/"$STYLE"}
+  echo "$LAYOUT" > "$WEB/if_$id.html"
+}
 
 # "SlideShow"
 # - slideshow hat verzeichnis
 # - alle bilder darin werden angezeigt
 # - optionen via.?
+generate_iframe_slideshow() {
+  Id="$1"
+
+  STYLE=`read_template_file "$id" "Style.txt" ""`
+  LAYOUT=`read_template_file "$id" "Layout.txt" ""`
+
+  LAYOUT=${LAYOUT/'%STYLE%'/"$STYLE"}
+  echo "$LAYOUT" > "$WEB/if_$id.html"
+}
 
 # "Uhr"
 # - hat auch optionen
+generate_iframe_uhr() {
+  Id="$1"
+
+  STYLE=`read_template_file "$id" "Style.txt" ""`
+  LAYOUT=`read_template_file "$id" "Layout.txt" ""`
+  OPTIONEN=`read_template_file "$id" "Optionen.txt" ""`
+
+  LAYOUT=${LAYOUT/'%STYLE%'/"$STYLE"}
+  LAYOUT=${LAYOUT/'%OPTIONEN%'/"$OPTIONEN"}
+  echo "$LAYOUT" > "$WEB/if_$id.html"
+}
 
 # "Webseite"
 # - nur eine webseite als option
+generate_iframe_webseite() {
+  Id="$1"
+
+  STYLE=`read_template_file "$id" "Style.txt" ""`
+  LAYOUT=`read_template_file "$id" "Layout.txt" ""`
+  OPTIONEN=`read_template_file "$id" "Optionen.txt" ""`
+
+  LAYOUT=${LAYOUT/'%STYLE%'/"$STYLE"}
+  LAYOUT=${LAYOUT/'%OPTIONEN%'/"$OPTIONEN"}
+  echo "$LAYOUT" > "$WEB/if_$id.html"
+}
 
 # "Newsfeed"
 # - einen feed und diverse einstellungen
 generate_iframe_newsfeed() {
   Id="$1"
-  Section="$2"
 
-  # System and User Template
-  Template="$TEMPLATES/Newsfeed"
-  UserTemplate="$SMB/$Section"
-  mkdir -p "$UserTemplate"
-
-  LAYOUT=`read_template_file  "$Template" "$UserTemplate" "Layout.txt" ""`
-  OPTIONEN=`read_template_file  "$Template" "$UserTemplate" "Optionen.txt" ""`
-  STYLE=`read_template_file   "$Template" "$UserTemplate" "Style.txt" ""`
-
-  UserDir="$SMB/$Section"
-  echo "$LAYOUT"   > "$UserDir/Layout.txt"
-  echo "$OPTIONEN" > "$UserDir/Optionen.txt"
-  echo "$STYLE"    > "$UserDir/Style.txt"
+  STYLE=`read_template_file "$id" "Style.txt" ""`
+  LAYOUT=`read_template_file "$id" "Layout.txt" ""`
+  OPTIONEN=`read_template_file "$id" "Optionen.txt" ""`
 
   LAYOUT=${LAYOUT/'%STYLE%'/"$STYLE"}
   LAYOUT=${LAYOUT/'%OPTIONEN%'/"$OPTIONEN"}
-  echo "$LAYOUT"  > "$UserDir/if_Wetter.txt"
+  echo "$LAYOUT" > "$WEB/if_$id.html"
 }
 
 # Type=Wetter Section="Wetter #1"
 generate_iframe_wetter() {
   Id="$1"
-  Section="$2"
 
-  # System and User Template
-  Template="$TEMPLATES/Wetter"
-  UserTemplate="$SMB/$Section"
-  mkdir -p "$UserTemplate"
-
-  LAYOUT=`read_template_file  "$Template" "$UserTemplate" "Layout.txt" ""`
-  STYLE=`read_template_file   "$Template" "$UserTemplate" "Style.txt" ""`
-  BUTTON1=`read_template_file "$Template" "$UserTemplate" "Button1.txt" "Wetterbutton 1 nicht gesetzt!"`
-  BUTTON2=`read_template_file "$Template" "$UserTemplate" "Button2.txt" "Wetterbutton 2 nicht gesetzt!"`
-  BUTTON3=`read_template_file "$Template" "$UserTemplate" "Button3.txt" "Wetterbutton 3 nicht gesetzt!"`
-
-  UserDir="$SMB/$Section"
-  echo "$LAYOUT"  > "$UserDir/Layout.txt"
-  echo "$STYLE"   > "$UserDir/Style.txt"
-  echo "$BUTTON1" > "$UserDir/Button1.txt"
-  echo "$BUTTON2" > "$UserDir/Button2.txt"
-  echo "$BUTTON3" > "$UserDir/Button3.txt"
+  STYLE=`read_template_file "$id" "Style.txt" ""`
+  LAYOUT=`read_template_file "$id" "Layout.txt" ""`
+  BUTTON1=`read_template_file "$id" "Button1.txt" "Wetterbutton 1 nicht gesetzt!"`
+  BUTTON2=`read_template_file "$id" "Button2.txt" "Wetterbutton 2 nicht gesetzt!"`
+  BUTTON3=`read_template_file "$id" "Button3.txt" "Wetterbutton 3 nicht gesetzt!"`
 
   LAYOUT=${LAYOUT/'%STYLE%'/"$STYLE"}
   LAYOUT=${LAYOUT/'%BUTTON1%'/"$BUTTON1"}
   LAYOUT=${LAYOUT/'%BUTTON2%'/"$BUTTON2"}
   LAYOUT=${LAYOUT/'%BUTTON3%'/"$BUTTON3"}
-  echo "$LAYOUT"  > "$UserDir/if_Wetter.txt"
-
-  echo "iframe#links {
-   position: fixed;
-   top: ${TOP[$id]}; left: ${LEFT[$id]};
-   width: ${WIDTH[$id]}; height: ${HEIGHT[$id]};
-  }" >> "$CACHE/iframe-styles"
-
-  # <iframe id="wetter" src="if_wetter.html" frameborder="0" scrolling="no"></iframe>
-  #echo -n > "$CACHE/iframe-links"
-  echo "<iframe id=\"id$id\" src=\"if_$id.html\" frameborder=\"0\" scrolling=\"no\"></iframe>" \
-    >> "$CACHE/iframe-links"
+  echo "$LAYOUT" > "$WEB/if_$id.html"
 }
 
 generate_iframe() {
@@ -265,27 +234,43 @@ generate_iframe() {
 
   case "$Type" in
     "Wetter")
-      generate_iframe_wetter "$id" "$Section"
+      generate_iframe_wetter "$id"
       ;;
-    "Ticker1")
-      generate_iframe_ticker "$Section"
+    "Ticker")
+      generate_iframe_ticker "$id"
       ;;
-    "SlideShow1")
-      generate_iframe_slideshow "$Section"
+    "SlideShow")
+      generate_iframe_slideshow "$id"
       ;;
-    "Uhr1")
-      generate_iframe_uhr "$Section"
+    "Uhr")
+      generate_iframe_uhr "$id"
       ;;
-    "Webseite1")
-      generate_iframe_webseite "$Section"
+    "Webseite")
+      generate_iframe_webseite "$id"
       ;;
-    "Newsfeed1")
-      generate_iframe_newsfeed "$Section"
+    "Newsfeed")
+      generate_iframe_newsfeed "$id"
       ;;
   esac
+
+  if [ "$Type" != "Background" ]; then
+    # style
+    echo "iframe#id$id {
+     position: fixed;
+     top: ${TOP[$id]};
+     left: ${LEFT[$id]};
+     width: ${WIDTH[$id]};
+     height: ${HEIGHT[$id]};
+    }" >> "$CACHE/iframe-styles"
+
+    # <iframe id="wetter" src="if_wetter.html" frameborder="0" scrolling="no"></iframe>
+    echo "<iframe id=\"id$id\" src=\"if_$id.html\" frameborder=\"0\" scrolling=\"no\"></iframe>" \
+      >> "$CACHE/iframe-links"
+  fi
 }
 
-# read layout file and set the array SECTIONS + TYPES
+# read layout file and set up the arrays:
+# SECTIONS + TYPES + TOP + ...
 read_layout() {
   file="$1"
   i="-1"
@@ -302,10 +287,11 @@ read_layout() {
     if [[ $var == Left=* ]]; then x=`echo "$var"|cut -b 6-`; LEFT[$i]="$x"; fi
     if [[ $var == Top=* ]]; then x=`echo "$var"|cut -b 5-`; TOP[$i]="$x"; fi
     if [[ $var == Width=* ]]; then x=`echo "$var"|cut -b 7-`; WIDTH[$i]="$x"; fi
-    if [[ $var == height=* ]]; then x=`echo "$var"|cut -b 8-`; HEIGHT[$i]="$x"; fi
+    if [[ $var == Height=* ]]; then x=`echo "$var"|cut -b 8-`; HEIGHT[$i]="$x"; fi
   done < "$file"
 
   # create directories / files in $SMB and $WEB
+  mkdir -p "$SMB/Templates"
   echo -n > "$CACHE/iframe-styles"
   echo -n > "$CACHE/iframe-links"
   for i in ${!SECTIONS[@]}; do
@@ -313,11 +299,14 @@ read_layout() {
     generate_iframe $i
   done
 
-  # 2) index für die iframes generieren
-  generate_index
-  
+  for i in ${!SECTIONS[@]}; do
+    test "${TYPES[$id]}" != "Background" && continue
+    # 2) index für die iframes generieren
+    generate_index $i
+  done
+
   # 3) cleanup
-  rm -f "$CACHE/iframe-*"
+  rm -f "$CACHE/"iframe-*
 }
 
 remove_layout() {
@@ -325,33 +314,6 @@ remove_layout() {
     rm -rf "$SMB/${SECTIONS[$i]}" "$WEB/${SECTIONS[$i]}"
   done
   SECTIONS=""
-}
-
-# read_value "file.ini" "section" "key" "default"
-read_value() {
-  file="$1"
-  section="$2"
-  key="$3"
-  value="$4"
-  found="0"
-  while IFS=$'=' read var val; do
-    if [[ $var == \[* ]]; then
-      v=`echo "$var"|tr -d "[]"|grep -v '^#'`
-      if [ "x$section" = "x$v" ]; then
-        found="1"
-      else
-        found="0"
-      fi
-    fi
-    if [[ $val ]]; then
-      if [ "x$found" = "x1" -a $key = $var ]; then
-        echo "$val"
-        return
-      fi
-    fi
-  done < "$file"
-  # default value
-  echo "$value"
 }
 
 # file was created @ $SMB
