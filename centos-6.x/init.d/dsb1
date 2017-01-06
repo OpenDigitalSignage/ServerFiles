@@ -1,0 +1,107 @@
+#!/bin/bash
+# testet on CentOS 6 /TR
+#########################
+
+### BEGIN INIT INFO
+# Provides: dsb
+# Default-Start: 3 4 5
+# Default-Stop: 0 1 2 6
+# Required-Start: $network
+# Short-Description: DSB inotify service
+# Description: A service to automatically detect changes on specific SMB Shares.
+# chkconfig: 2345 58 25
+### END INIT INFO
+
+# Source function library.
+. /etc/rc.d/init.d/functions
+
+# Configuration:
+NAME="dsb1"
+USER="dsb"
+
+# Samba Share and Webroot:
+SMB="/home/dsb/$NAME"
+WEB="/var/www/html/dsb/$NAME"
+
+# Internal use:
+CACHE="/var/cache/dsb/$NAME"
+LOCK="/var/lock/subsys/$NAME"
+FIFO="/var/run/dsb/$NAME.fifo"
+LOG="/var/log/dsb/$NAME.log"
+PID="/var/run/$NAME.pid"
+
+# Shellscript with inotify:
+PROG="/usr/sbin/dsbd"
+
+error() {
+    echo "$*"
+    exit 1
+}
+
+checkperms() {
+    for d in "$WEB" "$SMB" "$CACHE" `dirname $PID` `dirname $LOG`; do
+        mkdir -p "$d"
+        chown -R $USER "$d"
+    done
+    touch "$LOG"
+}
+
+RETVAL=0
+start() {
+    echo -n $"Starting $NAME"
+    test -p "$FIFO" || mkfifo "$FIFO"
+    chown -R $USER "$LOG" "$FIFO"
+    daemonize -u $USER -p $PID -l $LOCK $PROG "$SMB" "$WEB" "$LOG" "$FIFO" "$CACHE"
+    [ $RETVAL -eq 0 ] && success || failure
+    echo
+}
+
+stop() {
+    [ -f $LOCK ] || return 0
+    echo -n $"Stopping $NAME"
+    killproc -p $PID $NAME
+    RETVAL=$?
+    echo
+    [ $RETVAL -eq 0 ] && rm -f "$LOCK" "$FIFO"
+    return $RETVAL
+}
+
+rhstatus() {
+    [ -f $LOCK ] || return 0
+    status $NAME
+    return $?
+}
+
+# we need daemonize and inotifywait from @epel
+test -x /usr/sbin/daemonize || error "Need from @epel: yum install daemonize"
+test -x /usr/bin/inotifywait || error "Need from @epel: yum install inotify-tools"
+id $USER >/dev/null 2>&1 || error "User $USER does not exist!"
+
+# check permissions / directories
+checkperms
+
+case "$1" in
+   start)
+      start
+      ;;
+   stop)
+      stop
+      ;;
+   status)
+      rhstatus
+      ;;
+   restart)
+      stop
+      start
+      ;;
+   tailf)
+      tail -f $LOG
+      ;;
+   clearlog)
+      echo -n > $LOG
+      ;;
+   *)
+      echo $"Usage: $0 {start|stop|status|restart|tailf|clearlog}"
+      exit 1
+esac
+exit $?
