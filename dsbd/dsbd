@@ -13,6 +13,10 @@ CACHE="$5"
 FILES="/var/lib/dsb"
 TEMPLATES="$FILES/Templates"
 
+# time in seconds
+DSB_RELAOD_TIME="10"
+PDF_QUALITY="12"
+
 exec 1>>$LOG
 exec 2>&1
 
@@ -33,6 +37,7 @@ startup() {
   log "START SERVICE"
 
   # test for some tools, which are needed
+  test -x /usr/bin/rsync || error "Need rsync!"
   test -x /usr/bin/ffmpeg || error "Need ffmpeg!"
   test -x /usr/bin/mutool || error "Need mutool!"
   test -x /usr/bin/dos2unix || error "Need dos2unix!"
@@ -50,11 +55,11 @@ startup() {
 <oor:items xmlns:oor="http://openoffice.org/2001/registry" xmlns:xs="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
 <item oor:path="/org.openoffice.Office.Common/Filter/PDF/Export"><prop oor:name="ExportFormFields" oor:op="fuse"><value>false</value></prop></item>
 <item oor:path="/org.openoffice.Office.Common/Filter/PDF/Export"><prop oor:name="IsAddStream" oor:op="fuse"><value>false</value></prop></item>
-<item oor:path="/org.openoffice.Office.Common/Filter/PDF/Export"><prop oor:name="MaxImageResolution" oor:op="fuse"><value>1200</value></prop></item>
-<item oor:path="/org.openoffice.Office.Common/Filter/PDF/Export"><prop oor:name="ReduceImageResolution" oor:op="fuse"><value>false</value></prop></item>
-<item oor:path="/org.openoffice.Office.Common/Filter/PDF/Export"><prop oor:name="UseLosslessCompression" oor:op="fuse"><value>true</value></prop></item>
+<item oor:path="/org.openoffice.Office.Common/Filter/PDF/Export"><prop oor:name="MaxImageResolution" oor:op="fuse"><value>300</value></prop></item>
+<item oor:path="/org.openoffice.Office.Common/Filter/PDF/Export"><prop oor:name="ReduceImageResolution" oor:op="fuse"><value>true</value></prop></item>
+<item oor:path="/org.openoffice.Office.Common/Filter/PDF/Export"><prop oor:name="UseLosslessCompression" oor:op="fuse"><value>false</value></prop></item>
 <item oor:path="/org.openoffice.Office.Common/Filter/PDF/Export"><prop oor:name="SelectPdfVersion" oor:op="fuse"><value>1</value></prop></item>
-<item oor:path="/org.openoffice.Office.Common/Filter/PDF/Export"><prop oor:name="Quality" oor:op="fuse"><value>100</value></prop></item>
+<item oor:path="/org.openoffice.Office.Common/Filter/PDF/Export"><prop oor:name="Quality" oor:op="fuse"><value>90</value></prop></item>
 EOF
 
   cd $CACHE || error "Could not change to cachedir $CACHE"
@@ -67,28 +72,157 @@ cleanup() {
   exit 0
 }
 
-###### xxx
-# document.getElementById('some_frame_id').contentWindow.location.reload();
-
-
 # -> direct ins web
 conv_image() {
-  cp $1 $2
+  File="$1"
+  log "conv_image($1)"
+  convert $File "$File.png"
+  find . -iname "$File.png"|sort > "$File.txt"
 }
 
-# pdf, xps, cbz, and epub -> image
+# pdf, xps, cbz, and epub -> png
 conv_pdf() {
-  mutool draw -r 128 -o "%03d.png" puehlhofer_samstag_jan06_mitreferenzen.pdf
+  FileName="$1"
+  Dir=`dirname "$FileName"`
+  Base=`basename "$FileName"`
+
+  log "conv_pdf($1) -> $Dir/${Base}.txt"
+
+  # /dsb1-cache/SlideShow #1/FILE.pdf.d/FILE_001.png ...FILE_00N.png
+  # altes CacheDir löschen und neues erstellen
+  rm -rf "$Dir/$Base.d"
+  mkdir -p "$Dir/$Base.d"
+  mutool draw -r $PDF_QUALITY -o "$Dir/${Base}.d/${Base}_%03d.png" "$FileName"
+  find "$Dir/${Base}.d" -name "*.png" | sort > "$Dir/${Base}.txt"
 }
 
 # office -> pdf -> image
 # - wichtig, libreoffice einmal starten und pdf export qualität festlegen
 conv_office() {
-  libreoffice --convert-to "pdf" --headless $*
+  FileName="$1"
+  Dir=`dirname "$FileName"`
+  Base=`basename "$FileName"`
+  BaseNoExt=${Base%.*}
+
+  log "conv_office($1)"
+
+  rm -rf "$Dir/$Base.d"
+  mkdir -p "$Dir/$Base.d"
+  cp "$FileName" "$Dir/$Base.d"
+  cd "$Dir/$Base.d"
+  libreoffice --headless --convert-to "pdf" "$Base" >/dev/null
+  rm -f "$Base"
+  mutool draw -r $PDF_QUALITY -o "${Base}_%03d.png" "$BaseNoExt.pdf"
+  rm -f "$BaseNoExt.pdf"
+  find "$Dir/${Base}.d" -name "*.png" | sort > "$Dir/${Base}.txt"
+  cd $CACHE
 }
 
-conv_video() {
-  echo "lala"
+# eine mediendatei in den cache schieben
+cache_file() {
+  Src="$1"
+  Dst="$2"
+  File="$3"
+  Id="$4"
+
+  # overwrite old one...
+  cp -f "$Src/$File" "$Dst/$File"
+
+  # lower case filename
+  lcFile=${File,,}
+
+  # libreoffice (nicht alle)
+  [ "${lcFile: -4}" = ".cwk" ] && conv_office "$Dst/$File" # AppleWorks word processing
+  [ "${lcFile: -4}" = ".dxf" ] && conv_office "$Dst/$File" # AutoCAD DXF
+  [ "${lcFile: -4}" = ".cdr" ] && conv_office "$Dst/$File" # CorelDRAW 6-X7
+  [ "${lcFile: -4}" = ".cmx" ] && conv_office "$Dst/$File" # CorelDRAW 6-X7
+  [ "${lcFile: -4}" = ".dbf" ] && conv_office "$Dst/$File" # dBase
+  [ "${lcFile: -4}" = ".wk1" ] && conv_office "$Dst/$File" # Lotus 1-2-3
+  [ "${lcFile: -4}" = ".wks" ] && conv_office "$Dst/$File" # Lotus 1-2-3
+  [ "${lcFile: -4}" = ".123" ] && conv_office "$Dst/$File" # Lotus 1-2-3
+  [ "${lcFile: -4}" = ".hwp" ] && conv_office "$Dst/$File" # Hangul WP 97
+  [ "${lcFile: -4}" = ".mml" ] && conv_office "$Dst/$File" # MathML
+  [ "${lcFile: -4}" = ".xls" ] && conv_office "$Dst/$File" # MS Excel 4/5/95/97–2003
+  [ "${lcFile: -4}" = ".xlw" ] && conv_office "$Dst/$File" # MS Excel 4/5/95/97–2003
+  [ "${lcFile: -4}" = ".xlt" ] && conv_office "$Dst/$File" # MS Excel 4/5/95/97–2003
+  [ "${lcFile: -5}" = ".docx" ] && conv_office "$Dst/$File" # MS Office 2007 Office Open XML
+  [ "${lcFile: -5}" = ".xlsx" ] && conv_office "$Dst/$File" # MS Office 2007 Office Open XML
+  [ "${lcFile: -5}" = ".pptx" ] && conv_office "$Dst/$File" # MS Office 2007 Office Open XML
+  [ "${lcFile: -4}" = ".pxl" ] && conv_office "$Dst/$File" # MS Pocket Excel
+  [ "${lcFile: -4}" = ".psw" ] && conv_office "$Dst/$File" # MS Pocket Word
+  [ "${lcFile: -4}" = ".ppt" ] && conv_office "$Dst/$File" # MS PowerPoint 97–2003
+  [ "${lcFile: -4}" = ".pps" ] && conv_office "$Dst/$File" # MS PowerPoint 97–2003
+  [ "${lcFile: -4}" = ".pot" ] && conv_office "$Dst/$File" # MS PowerPoint 97–2003
+  [ "${lcFile: -4}" = ".rtf" ] && conv_office "$Dst/$File" # MS RTF
+  [ "${lcFile: -4}" = ".doc" ] && conv_office "$Dst/$File" # MS Word 4/5/6.0/95/97–2003
+  [ "${lcFile: -4}" = ".dot" ] && conv_office "$Dst/$File" # MS Word 4/5/6.0/95/97–2003
+  [ "${lcFile: -4}" = ".vsd" ] && conv_office "$Dst/$File" # MS Visio
+  [ "${lcFile: -4}" = ".psd" ] && conv_office "$Dst/$File" # PhotoShop
+  [ "${lcFile: -4}" = ".odt" ] && conv_office "$Dst/$File" # OpenDocument Text
+  [ "${lcFile: -4}" = ".ods" ] && conv_office "$Dst/$File" # OpenDocument ...
+  [ "${lcFile: -4}" = ".odp" ] && conv_office "$Dst/$File" # OpenDocument
+  [ "${lcFile: -4}" = ".odb" ] && conv_office "$Dst/$File" # OpenDocument
+  [ "${lcFile: -4}" = ".odg" ] && conv_office "$Dst/$File" # OpenDocument
+  [ "${lcFile: -4}" = ".odf" ] && conv_office "$Dst/$File" # OpenDocument
+  [ "${lcFile: -4}" = ".sxw" ] && conv_office "$Dst/$File" # OpenOffice.org XML
+  [ "${lcFile: -4}" = ".stw" ] && conv_office "$Dst/$File" # OpenOffice.org XML
+  [ "${lcFile: -4}" = ".sxc" ] && conv_office "$Dst/$File" # OpenOffice.org XML
+  [ "${lcFile: -4}" = ".sxi" ] && conv_office "$Dst/$File" # OpenOffice.org XML
+  [ "${lcFile: -4}" = ".sti" ] && conv_office "$Dst/$File" # OpenOffice.org XML
+  [ "${lcFile: -4}" = ".sxd" ] && conv_office "$Dst/$File" # OpenOffice.org XML
+  [ "${lcFile: -4}" = ".std" ] && conv_office "$Dst/$File" # OpenOffice.org XML
+  [ "${lcFile: -4}" = ".sxm" ] && conv_office "$Dst/$File" # OpenOffice.org XML
+  [ "${lcFile: -4}" = ".wb2" ] && conv_office "$Dst/$File" # Quattro Pro 6.0
+  [ "${lcFile: -4}" = ".wmf" ] && conv_office "$Dst/$File" # Windows Meta File
+  [ "${lcFile: -4}" = ".wpd" ] && conv_office "$Dst/$File" # WordPerfect
+  [ "${lcFile: -4}" = ".wps" ] && conv_office "$Dst/$File" # WordPerfect Suite 2000/Office 1.0
+
+  # mutool draw
+  log "test ${lcFile:-4} = .pdf ... "
+  [ "${lcFile: -4}" = ".pdf" ] && conv_pdf "$Dst/$File"
+  [ "${lcFile: -4}" = ".xps" ] && conv_pdf "$Dst/$File"
+  [ "${lcFile: -4}" = ".cbz" ] && conv_pdf "$Dst/$File"
+  [ "${lcFile: -5}" = ".epub" ] && conv_pdf "$Dst/$File"
+
+  # images
+  [ "${lcFile: -4}" = ".pcx" ] && conv_image "$Dst/$File" # PCX
+}
+
+# Bilder und andere Mediendateien einlesen bzw. konvertieren
+read_mediafiles() {
+  Id="$1"
+
+  log "read_mediafiles id($Id)"
+
+  # UserDir = Files aus dem Samba Share
+  # CacheDir = dort wandeln wir um, *.txt wird ignoriert
+  UserDir="$SMB/$Section"
+  CacheDir="$CACHE/$Section"
+  mkdir -p "$CacheDir"
+
+  # cleanup old one, if there
+  echo -n > "$WEB/if_$Id.txt"
+  rm -rf "$WEB/if_$Id"
+  mkdir -p "$WEB/if_$Id"
+
+  # für alle Dateien im SlideShow Ordner, die nicht *.txt sind:
+  find "$UserDir" -type f \! -iname "*.txt" | while read F; do
+    File=`basename "$F"`
+
+    # noch nicht im cache, da rein...
+    # oder: cachefile ist älter als smbfile
+    test -f "$CacheDir/$File" \
+    -o "$CacheDir/$File" -nt "$CacheDir/$File" \
+    || cache_file "$UserDir" "$CacheDir" "$File" "$Id"
+
+    log "read_cache($CacheDir/$File.txt)"
+    while read line; do
+      # png ins web verlinken und .txt file damit erstellen
+      md5=`echo $line | md5sum | cut -b1-32`
+      ln -s -f "$line" "$WEB/if_$Id/$md5.png"
+      echo "if_$Id/$md5.png" >> "$WEB/if_$Id.txt"
+    done < "$CacheDir/$File.txt"
+  done
 }
 
 # Inhalt eines Templates lesen und zurück geben
@@ -99,55 +233,50 @@ conv_video() {
 read_template_file() {
   Id="$1"
   File="$2"
-  Value="$3"
 
-  Type="${TYPES[$id]}"
-  Section="${SECTIONS[$id]}"
+  Type="${TYPES[$Id]}"
+  Section="${SECTIONS[$Id]}"
 
   # System Template, SMB Template and User Template
   SysDir="$TEMPLATES/$Type"
   SMBDir="$SMB/Templates/$Type"
   UserDir="$SMB/$Section"
 
-  if [ ! -d "$SMBDir" ]; then
-    cp -r "$SysDir" "$SMBDir"
-  fi
+  # log "read_template Type=$Type / section=$Section / SysDir=$SysDir / SMBDir=$SMBDir / UserDir=$UserDir"
 
-  if [ ! -d "$UserDir" ]; then
-    cp -r "$SMBDir" "$UserDir"
-  fi
+  # Update Templates im Samba Share
+  rsync -aqu "$SysDir/" "$SMBDir/"
 
+  # Update User Templates im Samba Share
+  rsync -aqu "$SMBDir/" "$UserDir/"
+
+  # log "find \"$UserDir\" -iname \"$File\""
   find "$UserDir" -iname "$File" | while read f; do
-    Value=`cat "$f"`
+    cat "$f"
   done
-
-  echo "$Value"
 }
 
-generate_index() {
-  Id="$1"
-
-  STYLE=`read_template_file "$id" "Style.txt" ""`
-  LAYOUT=`read_template_file "$id" "Layout.txt" ""`
-  IFRAME_STYLES=`cat "$CACHE/iframe-styles"`
-  IFRAME_LINKS=`cat "$CACHE/iframe-links"`
-
-  LAYOUT=${LAYOUT/'%STYLE%'/"$STYLE"}
-  LAYOUT=${LAYOUT/'%IFRAME_STYLES%'/"$IFRAME_STYLES"}
-  LAYOUT=${LAYOUT/'%IFRAME_LINKS%'/"$IFRAME_LINKS"}
-  echo "$LAYOUT" > "$WEB/index.html"
-}
-
-# "Ticker"
-# - ticker hat ticker.txt
+# "Ticker" / IO
 generate_iframe_ticker() {
   Id="$1"
 
-  STYLE=`read_template_file "$id" "Style.txt" ""`
-  LAYOUT=`read_template_file "$id" "Layout.txt" ""`
+  STYLE=`read_template_file "$Id" "Style.txt"`
+  LAYOUT=`read_template_file "$Id" "Layout.txt"`
+  TICKER=`read_template_file "$Id" "Ticker.txt"`
+  OPTIONEN=`read_template_file "$Id" "Optionen.txt"`
 
   LAYOUT=${LAYOUT/'%STYLE%'/"$STYLE"}
-  echo "$LAYOUT" > "$WEB/if_$id.html"
+  LAYOUT=${LAYOUT/'%OPTIONEN%'/"$OPTIONEN"}
+  T=""
+  while IFS= read -r line; do
+    T="$T<li>$line</li>"
+  done <<< "$TICKER"
+  LAYOUT=${LAYOUT/'%TICKER%'/"$T"}
+
+  RELOAD="dsb_checkreload(\"if_$Id.html\", $DSB_RELAOD_TIME);"
+  RELOAD="$RELAOD /* `date` */ "
+  LAYOUT=${LAYOUT/'%DSB_RELOAD%'/"$RELOAD"}
+  echo "$LAYOUT" > "$WEB/if_$Id.html"
 }
 
 # "SlideShow"
@@ -157,116 +286,184 @@ generate_iframe_ticker() {
 generate_iframe_slideshow() {
   Id="$1"
 
-  STYLE=`read_template_file "$id" "Style.txt" ""`
-  LAYOUT=`read_template_file "$id" "Layout.txt" ""`
+  STYLE=`read_template_file "$Id" "Style.txt"`
+  LAYOUT=`read_template_file "$Id" "Layout.txt"`
+  OPTIONEN=`read_template_file "$Id" "Optionen.txt"`
+
+  read_mediafiles "$Id"
 
   LAYOUT=${LAYOUT/'%STYLE%'/"$STYLE"}
-  echo "$LAYOUT" > "$WEB/if_$id.html"
+  LAYOUT=${LAYOUT/'%OPTIONEN%'/"$OPTIONEN"}
+  LAYOUT=${LAYOUT/'%DSB_SLIDER%'/"\"if_$Id.txt\""}
+
+  RELOAD="dsb_checkreload(\"if_$Id.html\", $DSB_RELAOD_TIME);"
+  RELOAD="$RELAOD /* `date` */ "
+  LAYOUT=${LAYOUT/'%DSB_RELOAD%'/"$RELOAD"}
+  echo "$LAYOUT" > "$WEB/if_$Id.html"
 }
 
-# "Uhr"
-# - hat auch optionen
+# "Uhr" / IO
 generate_iframe_uhr() {
   Id="$1"
 
-  STYLE=`read_template_file "$id" "Style.txt" ""`
-  LAYOUT=`read_template_file "$id" "Layout.txt" ""`
-  OPTIONEN=`read_template_file "$id" "Optionen.txt" ""`
+  STYLE=`read_template_file "$Id" "Style.txt"`
+  LAYOUT=`read_template_file "$Id" "Layout.txt"`
+  OPTIONEN=`read_template_file "$Id" "Optionen.txt"`
 
   LAYOUT=${LAYOUT/'%STYLE%'/"$STYLE"}
   LAYOUT=${LAYOUT/'%OPTIONEN%'/"$OPTIONEN"}
-  echo "$LAYOUT" > "$WEB/if_$id.html"
+
+  RELOAD="dsb_checkreload(\"if_$Id.html\", $DSB_RELAOD_TIME);"
+  RELOAD="$RELAOD /* `date` */ "
+  LAYOUT=${LAYOUT/'%DSB_RELOAD%'/"$RELOAD"}
+  echo "$LAYOUT" > "$WEB/if_$Id.html"
 }
 
-# "Webseite"
-# - nur eine webseite als option
+# "Webseite" / IO
 generate_iframe_webseite() {
   Id="$1"
 
-  STYLE=`read_template_file "$id" "Style.txt" ""`
-  LAYOUT=`read_template_file "$id" "Layout.txt" ""`
-  OPTIONEN=`read_template_file "$id" "Optionen.txt" ""`
+  STYLE=`read_template_file "$Id" "Style.txt"`
+  LAYOUT=`read_template_file "$Id" "Layout.txt"`
+  OPTIONEN=`read_template_file "$Id" "Optionen.txt"`
 
   LAYOUT=${LAYOUT/'%STYLE%'/"$STYLE"}
   LAYOUT=${LAYOUT/'%OPTIONEN%'/"$OPTIONEN"}
-  echo "$LAYOUT" > "$WEB/if_$id.html"
+
+  RELOAD="dsb_checkreload(\"if_$Id.html\", $DSB_RELAOD_TIME);"
+  RELOAD="$RELAOD /* `date` */ "
+  LAYOUT=${LAYOUT/'%DSB_RELOAD%'/"$RELOAD"}
+  echo "$LAYOUT" > "$WEB/if_$Id.html"
 }
 
-# "Newsfeed"
-# - einen feed und diverse einstellungen
+# "Newsfeed" / IO
 generate_iframe_newsfeed() {
   Id="$1"
 
-  STYLE=`read_template_file "$id" "Style.txt" ""`
-  LAYOUT=`read_template_file "$id" "Layout.txt" ""`
-  OPTIONEN=`read_template_file "$id" "Optionen.txt" ""`
+  STYLE=`read_template_file "$Id" "Style.txt"`
+  LAYOUT=`read_template_file "$Id" "Layout.txt"`
+  OPTIONEN=`read_template_file "$Id" "Optionen.txt"`
 
   LAYOUT=${LAYOUT/'%STYLE%'/"$STYLE"}
   LAYOUT=${LAYOUT/'%OPTIONEN%'/"$OPTIONEN"}
-  echo "$LAYOUT" > "$WEB/if_$id.html"
+
+  RELOAD="dsb_checkreload(\"if_$Id.html\", $DSB_RELAOD_TIME);"
+  RELOAD="$RELAOD /* `date` */ "
+  LAYOUT=${LAYOUT/'%DSB_RELOAD%'/"$RELOAD"}
+  echo "$LAYOUT" > "$WEB/if_$Id.html"
 }
 
-# Type=Wetter Section="Wetter #1"
+# "Wetter" / IO
 generate_iframe_wetter() {
   Id="$1"
 
-  STYLE=`read_template_file "$id" "Style.txt" ""`
-  LAYOUT=`read_template_file "$id" "Layout.txt" ""`
-  BUTTON1=`read_template_file "$id" "Button1.txt" "Wetterbutton 1 nicht gesetzt!"`
-  BUTTON2=`read_template_file "$id" "Button2.txt" "Wetterbutton 2 nicht gesetzt!"`
-  BUTTON3=`read_template_file "$id" "Button3.txt" "Wetterbutton 3 nicht gesetzt!"`
+  STYLE=`read_template_file "$Id" "Style.txt"`
+  LAYOUT=`read_template_file "$Id" "Layout.txt"`
+  BUTTON1=`read_template_file "$Id" "Button1.txt"`
+  BUTTON2=`read_template_file "$Id" "Button2.txt"`
+  BUTTON3=`read_template_file "$Id" "Button3.txt"`
 
   LAYOUT=${LAYOUT/'%STYLE%'/"$STYLE"}
   LAYOUT=${LAYOUT/'%BUTTON1%'/"$BUTTON1"}
   LAYOUT=${LAYOUT/'%BUTTON2%'/"$BUTTON2"}
   LAYOUT=${LAYOUT/'%BUTTON3%'/"$BUTTON3"}
-  echo "$LAYOUT" > "$WEB/if_$id.html"
+
+  RELOAD="dsb_checkreload(\"if_$Id.html\", $DSB_RELAOD_TIME);"
+  RELOAD="$RELAOD /* `date` */ "
+  LAYOUT=${LAYOUT/'%DSB_RELOAD%'/"$RELOAD"}
+  echo "$LAYOUT" > "$WEB/if_$Id.html"
+}
+
+# Frameset
+generate_index() {
+  Id="$1"
+
+  STYLE=`read_template_file "$Id" "Style.txt"`
+  LAYOUT=`read_template_file "$Id" "Layout.txt"`
+  IFRAME_STYLES=`cat "$CACHE/iframe-styles"`
+  IFRAME_LINKS=`cat "$CACHE/iframe-links"`
+
+  LAYOUT=${LAYOUT/'%STYLE%'/"$STYLE"}
+  LAYOUT=${LAYOUT/'%IFRAME_STYLES%'/"$IFRAME_STYLES"}
+  LAYOUT=${LAYOUT/'%IFRAME_LINKS%'/"$IFRAME_LINKS"}
+
+  RELOAD="dsb_checkreload(\"indexX.html\", $DSB_RELAOD_TIME);"
+  RELOAD="$RELAOD /* `date` */ "
+  LAYOUT=${LAYOUT/'%DSB_RELOAD%'/"$RELOAD"}
+  echo "$LAYOUT" > "$WEB/indexX.html"
 }
 
 generate_iframe() {
-  id="$1"
+  Id="$1"
 
   # "Wetter #1"
-  Section="${SECTIONS[$id]}"
+  Section="${SECTIONS[$Id]}"
 
   # Types: Background Wetter Ticker SlideShow Uhr Webseite Newsfeed
-  Type="${TYPES[$id]}"
+  Type="${TYPES[$Id]}"
 
+  log "generate_iframe() id=$Id / Section=$Section / Type=$Type"
   case "$Type" in
     "Wetter")
-      generate_iframe_wetter "$id"
+      generate_iframe_wetter "$Id"
       ;;
     "Ticker")
-      generate_iframe_ticker "$id"
+      generate_iframe_ticker "$Id"
       ;;
     "SlideShow")
-      generate_iframe_slideshow "$id"
+      generate_iframe_slideshow "$Id"
       ;;
     "Uhr")
-      generate_iframe_uhr "$id"
+      generate_iframe_uhr "$Id"
       ;;
     "Webseite")
-      generate_iframe_webseite "$id"
+      generate_iframe_webseite "$Id"
       ;;
     "Newsfeed")
-      generate_iframe_newsfeed "$id"
+      generate_iframe_newsfeed "$Id"
       ;;
   esac
 
+  STYLES[$Id]=`read_template_file "$Id" "Rahmen.txt"`
   if [ "$Type" != "Background" ]; then
     # style
-    echo "iframe#id$id {
-     position: fixed;
-     top: ${TOP[$id]};
-     left: ${LEFT[$id]};
-     width: ${WIDTH[$id]};
-     height: ${HEIGHT[$id]};
-    }" >> "$CACHE/iframe-styles"
+    echo "iframe#id$Id {
+  position: fixed;
+  top: ${TOP[$Id]};
+  left: ${LEFT[$Id]};
+  width: ${WIDTH[$Id]};
+  height: ${HEIGHT[$Id]};
+  ${STYLES[$Id]}
+}" >> "$CACHE/iframe-styles"
 
-    # <iframe id="wetter" src="if_wetter.html" frameborder="0" scrolling="no"></iframe>
-    echo "<iframe id=\"id$id\" src=\"if_$id.html\" frameborder=\"0\" scrolling=\"no\"></iframe>" \
+    echo "<iframe id=\"id$Id\" src=\"if_$Id.html\" scrolling=\"no\"></iframe>" \
       >> "$CACHE/iframe-links"
   fi
+}
+
+generate_site() {
+  # create directories / files in $SMB and $WEB
+  mkdir -p "$SMB/Templates"
+  echo -n > "$CACHE/iframe-styles"
+  echo -n > "$CACHE/iframe-links"
+
+  # 1) update js directory
+  rsync -qau "$FILES/js/" "$WEB/js/"
+
+  # 2) nur die iframes generieren
+  for i in ${!SECTIONS[@]}; do
+    generate_iframe $i
+  done
+
+  # 3) nun den index für die iframes generieren
+  for i in ${!SECTIONS[@]}; do
+    test "${TYPES[$i]}" = "Background" || continue
+    generate_index $i
+  done
+
+  # 4) cleanup
+  rm -f "$CACHE/"iframe-*
+
 }
 
 # read layout file and set up the arrays:
@@ -290,23 +487,7 @@ read_layout() {
     if [[ $var == Height=* ]]; then x=`echo "$var"|cut -b 8-`; HEIGHT[$i]="$x"; fi
   done < "$file"
 
-  # create directories / files in $SMB and $WEB
-  mkdir -p "$SMB/Templates"
-  echo -n > "$CACHE/iframe-styles"
-  echo -n > "$CACHE/iframe-links"
-  for i in ${!SECTIONS[@]}; do
-    # 1) nur die iframes generieren
-    generate_iframe $i
-  done
-
-  for i in ${!SECTIONS[@]}; do
-    test "${TYPES[$id]}" != "Background" && continue
-    # 2) index für die iframes generieren
-    generate_index $i
-  done
-
-  # 3) cleanup
-  rm -f "$CACHE/"iframe-*
+  generate_site
 }
 
 remove_layout() {
@@ -329,8 +510,15 @@ handle_create() {
     cat "$fullpath" | dos2unix > "$CACHE/$basefile"
     read_layout "$CACHE/$basefile"
     rm -f "$CACHE/$basefile"
-    return
   fi
+
+  # check if some section was modified
+  for i in ${!SECTIONS[@]}; do
+    Section="${SECTIONS[$i],,}"
+    if [ "${directory}" = "$Section" ]; then
+      generate_site
+    fi
+  done
 }
 
 # file was removed in $SMB
@@ -346,6 +534,14 @@ handle_delete() {
     remove_layout
     return
   fi
+
+  # check if some section was modified
+  for i in ${!SECTIONS[@]}; do
+    Section="${SECTIONS[$i],,}"
+    if [ "${directory}" = "$Section" ]; then
+      generate_site
+    fi
+  done
 }
 
 # some error checking and initializing
@@ -353,7 +549,7 @@ test -z $5 && error "Need 5 parameter!"
 startup
 
 # globals arrays for the layout
-declare -A "SECTIONS" "TYPES" "LEFT" "TOP" "WIDTH" "HEIGHT"
+declare -A "SECTIONS" "TYPES" "LEFT" "TOP" "WIDTH" "HEIGHT" "STYLES"
 
 # start inotifywait and put in background
 inotifywait --monitor --recursive \
