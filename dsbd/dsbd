@@ -3,8 +3,8 @@
 # dsb daemon written in shell
 #
 # ctime: 2015-12-18 /TR
-# mtime: 2016-01-06 /TR
-# version: 0.13
+# mtime: 2016-01-11 /TR
+# version: 0.15
 #############################################
 
 SMB="$1"
@@ -97,7 +97,9 @@ clean_fifo() {
     # echo "ignoring line: [$ignored]"
   done
   if [ "$counter" != "0" ]; then
-    log "Anzahl ignorierter Inotify's: $counter"
+    log "Ignorierte Inotify's: $counter"
+    # reload site, so no update gets lost
+    touch "$LAYOUTFILE"
   fi
 }
 
@@ -269,7 +271,7 @@ read_template_files() {
   done
 
   # reload kann überall drinnen sein
-  RELOAD="dsb_checkreload(\"if_$Id.html.md5\", $DSB_RELOAD_TIME);"
+  RELOAD="dsb_checkreload(\"if_$Id.html.md5\", $DSB_RELOAD_TIME); <!-- Update @ `date` -->"
   LAYOUT=${LAYOUT/'%DSB_RELOAD%'/"$RELOAD"}
 }
 
@@ -552,6 +554,9 @@ while read -u $FIFO_FD -r inotifyline; do
 
   # .files are ignored
   [ "${basefile:0:1}" = "." ] && continue
+
+  # ~$lala.doc -> Word Tempfiles
+  [ "${basefile:0:1}" = "~" ] && continue
 
   # debugging:
   # log "filename($filename) e($event)"
