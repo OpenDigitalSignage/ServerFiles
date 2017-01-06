@@ -19,7 +19,7 @@ TEMPLATES="$LIBFILES/Templates"
 
 # time in seconds
 DSB_RELOAD_TIME="3"
-PDF_QUALITY="-h 1080"
+PDF_QUALITY="-r 110"
 
 exec 1>>$LOG
 exec 2>&1
@@ -88,7 +88,7 @@ clean_fifo() {
     read -t 0.01 -u $FIFO_FD ignored
     test "$?" != "0" && break
     counter=$((counter+1))
-    # echo "ignoring line: $ignored"
+    # echo "ignoring line: [$ignored]"
   done
   if [ "$counter" != "0" ]; then
     log "Anzahl ignorierter Inotify's: $counter"
@@ -100,7 +100,6 @@ generate_img_list() {
   echo -n > "$CacheDir/$File.img"
   find "$CacheDir/$File.d" -name "*.png" | sort | while read f; do
     md5=`echo $f|md5sum | cut -b1-32`
-    log ln -s -f "$f" "$WEB/if_$Id/$md5.png"
     ln -s -f "$f" "$WEB/if_$Id/$md5.png"
     echo "<img id=\"$md5\" src=\"if_$Id/$md5.png\" alt=\"\">" >> "$CacheDir/$File.img"
   done
@@ -108,7 +107,7 @@ generate_img_list() {
 
 # -> direct ins web (jpg, gif usw)
 conv_direct() {
-  log "conv_direct($File -> $CacheDir/$File.img"
+  log "conv_direct -> $CacheDir/$File.img"
   rm -rf "$CacheDir/$File.d"
   mkdir -p "$CacheDir/$File.d"
   ln -s "$CacheDir/$File" "$CacheDir/$File.d/$File"
@@ -116,6 +115,7 @@ conv_direct() {
   echo -n > "$CacheDir/$File.img"
   find "$CacheDir/$File.d" -name "*.$lcExt" | sort | while read f; do
     md5=`echo $f|md5sum | cut -b1-32`
+    #log "echo $f|md5sum | cut -b1-32 = md5($md5)"
     ln -s -f "$f" "$WEB/if_$Id/$md5.$lcExt"
     echo "<img id=\"$md5\" src=\"if_$Id/$md5.$lcExt\" alt=\"\">" >> "$CacheDir/$File.img"
   done
@@ -138,7 +138,7 @@ conv_video() {
 
 # convert image file via Image Magick comvert tool to png
 conv_images() {
-  log "conv_image($File -> $CacheDir/$File.img"
+  log "conv_image -> $CacheDir/$File.img"
   rm -rf "$CacheDir/$File.d"
   mkdir -p "$CacheDir/$File.d"
   convert "$CacheDir/$File" "$CacheDir/$File.d/$File.png"
@@ -179,7 +179,7 @@ conv_office() {
 cache_file() {
   Ext=${File##*.}
   lcExt=${Ext,,}
-  log "cache_file() UserDir=$UserDir, CacheDir=$CacheDir, File=$File, Ext=$Ext, lcExt=$lcExt"
+  # log "cache_file() UserDir=$UserDir, CacheDir=$CacheDir, File=$File, Ext=$Ext, lcExt=$lcExt"
 
   # overwrite old one...
   cp -p -f "$UserDir/$File" "$CacheDir/$File"
@@ -238,7 +238,7 @@ read_template_file() {
 
   # log "find \"$UserDir\" -iname \"$File\""
   find "$UserDir" -iname "$File" | while read f; do
-    cat "$f"
+    cat "$f" | dos2unix
   done
 }
 
@@ -310,7 +310,7 @@ generate_index() {
   # generate frameset and md5sum of it
   echo "$LAYOUT" > "$WEB/if_$Id.html"
   cat "$WEB/if_$Id.html" | md5sum | cut -b1-10 > "$WEB/if_$Id.html.md5"
-  ln -s -f "if_$Id.html" "$WEB/indexX.html"
+  ln -s -f "if_$Id.html" "$WEB/index.html"
 }
 
 # einen IFrame erzeugen
@@ -430,9 +430,25 @@ remove_layout() {
     unset TOP[$i]
     unset WIDTH[$i]
     unset HEIGHT[$i]
-    rm -rf "$SMB/$s" "$WEB/$s" "$WEB/js/" \
-     "$WEB/if_$i."* "$WEB/if_$i" "$WEB/index."* "$CACHE"/*
+    rm -rf "$WEB/$s" "$WEB/js/" "$WEB/if_$i."* "$WEB/if_$i" "$WEB/index."* "$CACHE"/*
+    test -f "$SMB/$s/#keep.txt" || rm -rf "$SMB/$s"
   done
+}
+
+# $filename + $Section are set
+remove_cached() {
+  Section="${SECTIONS[$i]}"
+  CacheDir="$CACHE/$Section"
+  File=`basename "$filename"`
+  md5=`echo "$CacheDir/$File.d/$File"|md5sum |cut -b1-32`
+  # log "Cache geleert: $File, md5:$md5"
+
+  # remove old cached files
+  rm -rf "$CacheDir/$File"*
+
+  # remove the broken links now:
+  find "$WEB/if_$i/" -type l ! -exec test -e {} \; -exec rm -f {} \;
+  File=""
 }
 
 # file was created @ $SMB
@@ -472,7 +488,10 @@ handle_delete() {
     Section="${SECTIONS[$i],,}"
     if [ "${directory}" = "$Section" ]; then
       log "Datei gelöscht: [$directory/$basefile]"
-      generate_site
+      remove_cached
+      for i in "$SMB"/*[dD][sS][bB]; do
+        test -f "$i" && touch "$i"
+      done
     fi
   done
 }
