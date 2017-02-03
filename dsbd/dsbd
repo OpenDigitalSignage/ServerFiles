@@ -1,10 +1,10 @@
 #!/bin/bash
 #
-# dsb daemon written in shell
+# dsbd daemon written in shell
 #
 # ctime: 2015-12-18 /TR
-# mtime: 2016-08-29 /TR
-# version: 0.17
+# mtime: 2017-01-19 /TR
+# version: 0.18
 #############################################
 
 SMB="$1"
@@ -14,7 +14,7 @@ FIFO="$4"
 CACHE="$5"
 
 # javascript files and templates
-LIBFILES="/var/lib/dsb"
+LIBFILES="/var/lib/dsbd"
 
 # time in seconds
 DSB_RELOAD_TIME="5"
@@ -37,6 +37,13 @@ log() {
 error() {
   log "$*"
   exit 1
+}
+
+# give some hashsum of input to output
+hashsum() {
+  HASHLEN=32
+  test -z $1 || HASHLEN=$1
+  cat | md5sum | cut -b1-$HASHLEN
 }
 
 # called once in beginning
@@ -99,7 +106,7 @@ clean_fifo() {
   if [ "$counter" != "0" ]; then
     log "Ignorierte Inotify's: $counter"
     # reload site, so no update gets lost
-    touch "$LAYOUTFILE"
+    touch "$DSB_LAYOUT"
   fi
 }
 
@@ -107,9 +114,9 @@ clean_fifo() {
 generate_img_list() {
   echo -n > "$CacheDir/$File.img"
   find "$CacheDir/$File.d" -name "*.png" | sort | while read f; do
-    md5=`echo $f|md5sum | cut -b1-32`
-    ln -s -f "$f" "$WEB/if_$Id/$md5.png"
-    echo "<img id=\"$md5\" src=\"if_$Id/$md5.png\" alt=\"\">" >> "$CacheDir/$File.img"
+    hashstr=`echo $f|hashsum 32`
+    ln -s -f "$f" "$WEB/if_$Id/$hashstr.png"
+    echo "<img id=\"$hashstr\" src=\"if_$Id/$hashstr.png\" alt=\"\">" >> "$CacheDir/$File.img"
   done
 }
 
@@ -122,10 +129,9 @@ conv_direct() {
   # <img> liste machen
   echo -n > "$CacheDir/$File.img"
   find "$CacheDir/$File.d" -iname "*.$lcExt" | sort | while read f; do
-    md5=`echo $f|md5sum | cut -b1-32`
-    #log "echo $f|md5sum | cut -b1-32 = md5($md5)"
-    ln -s -f "$f" "$WEB/if_$Id/$md5.$lcExt"
-    echo "<img id=\"$md5\" src=\"if_$Id/$md5.$lcExt\" alt=\"\">" >> "$CacheDir/$File.img"
+    hashstr=`echo $f|hashsum 32`
+    ln -s -f "$f" "$WEB/if_$Id/$hashstr.$lcExt"
+    echo "<img id=\"$hashstr\" src=\"if_$Id/$hashstr.$lcExt\" alt=\"\">" >> "$CacheDir/$File.img"
   done
 }
 
@@ -138,9 +144,9 @@ conv_video() {
   # <video> liste machen
   echo -n > "$CacheDir/$File.video"
   find "$CacheDir/$File.d" -iname "*.$lcExt" | sort | while read f; do
-    md5=`echo $f|md5sum | cut -b1-32`
-    ln -s -f "$f" "$WEB/if_$Id/$md5.$lcExt"
-    echo "<video id=\"$md5\" src=\"if_$Id/$md5.$lcExt\" controls></video>" >> "$CacheDir/$File.video"
+    hashstr=`echo $f|hashsum 32`
+    ln -s -f "$f" "$WEB/if_$Id/$hashstr.$lcExt"
+    echo "<video id=\"$hashstr\" src=\"if_$Id/$hashstr.$lcExt\" controls></video>" >> "$CacheDir/$File.video"
   done
 }
 
@@ -271,7 +277,7 @@ read_template_files() {
   done
 
   # reload kann überall drinnen sein
-  RELOAD="dsb_checkreload(\"if_$Id.html.md5\", $DSB_RELOAD_TIME); <!-- Update @ `date` -->"
+  RELOAD="dsb_checkreload(\"if_$Id.html.hashstr\", $DSB_RELOAD_TIME); <!-- Update @ `date` -->"
   LAYOUT=${LAYOUT/'%DSB_RELOAD%'/"$RELOAD"}
 }
 
@@ -323,9 +329,9 @@ generate_index() {
   read_mediafiles
   LAYOUT=${LAYOUT/'%DSB_MEDIA%'/"$MEDIAFILES"}
 
-  # generate frameset and md5sum of it
+  # generate frameset and hashsum of it
   echo "$LAYOUT" > "$WEB/if_$Id.html"
-  cat "$WEB/if_$Id.html" | md5sum | cut -b1-10 > "$WEB/if_$Id.html.md5"
+  cat "$WEB/if_$Id.html" | hashsum 10 > "$WEB/if_$Id.html.hashstr"
   ln -s -f "if_$Id.html" "$WEB/index.html"
 }
 
@@ -359,9 +365,9 @@ generate_iframe() {
       ;;
   esac
 
-  # generate iframe and md5sum of it
+  # generate iframe and hashsum of it
   echo "$LAYOUT" > "$WEB/if_$Id.html"
-  cat "$WEB/if_$Id.html" | md5sum | cut -b1-10 > "$WEB/if_$Id.html.md5"
+  cat "$WEB/if_$Id.html" | hashsum 10 > "$WEB/if_$Id.html.hashstr"
 
   # style
   STYLES[$Id]=`read_template_file "#Rahmen.txt"`
@@ -450,7 +456,9 @@ remove_layout() {
     unset WIDTH[$i]
     unset HEIGHT[$i]
     rm -rf "$WEB/$s" "$WEB/js/" "$WEB/if_$i."* "$WEB/if_$i" "$WEB/index."* "$CACHE"/*
-    test -f "$SMB/$s/#keep.txt" || rm -rf "$SMB/$s"
+    # remove old layout, when no #keep.txt exists
+    # -> disabled, currently not relly usefull
+    # test -f "$SMB/$s/#keep.txt" || rm -rf "$SMB/$s"
   done
 }
 
@@ -459,8 +467,8 @@ remove_cached() {
   Section="${SECTIONS[$i]}"
   CacheDir="$CACHE/$Section"
   File=`basename "$filename"`
-  md5=`echo "$CacheDir/$File.d/$File"|md5sum |cut -b1-32`
-  # log "Cache geleert: $File, md5:$md5"
+  hashstr=`echo "$CacheDir/$File.d/$File"|hashsum 32`
+  # log "Cache geleert: $File, hashstr:$hashstr"
 
   # remove old cached files
   rm -rf "$CacheDir/$File"*
@@ -474,17 +482,12 @@ remove_cached() {
 handle_create() {
   # log "handle_create file($basefile) dir($directory) orig($fullpath)"
 
-  # check for extension dsbd
-  ext=${filename##*.}
-  if [ "$ext" = "dsbd" ]; then
-    for i in "$SMB"/[lL][aA][yY][oO][uU][tT]\.[dD][sS][bB][dD]; do
-      test -f "$i" || continue
-      LAYOUTFILE="$SMB"/`readlink $i`
-      log "Layout einlesen: [$directory/$basefile]"
-      cat "$fullpath" | dos2unix | iconv -f latin1 -t utf8 > "$CACHE/$basefile"
-      read_layout "$CACHE/$basefile"
-      rm -f "$CACHE/$basefile"
-    done
+  # check, if current layout has changed
+  if [ "$fullpath" = "$DSB_LAYOUT" ]; then
+    log "Layout einlesen: [$DSB_LAYOUT]"
+    cat "$DSB_LAYOUT" | dos2unix | iconv -f latin1 -t utf8 > "$CACHE/$basefile"
+    read_layout "$CACHE/$basefile"
+    rm -f "$CACHE/$basefile"
   fi
 
   # check if some section was modified
@@ -501,8 +504,8 @@ handle_create() {
 handle_delete() {
   # log "handle_delete file($basefile) dir($directory) orig($fullpath)"
 
-  # special file "Layout.dsbd"
-  if [ "${basefile}" = "layout.dsbd" ]; then
+  # special file "layout.dsbd"
+  if [ "$fullpath" = "$DSB_LAYOUT" ]; then
     log "Layout enfernt..."
     remove_layout
   fi
@@ -513,7 +516,7 @@ handle_delete() {
     if [ "${directory}" = "$Section" ]; then
       log "Datei gelöscht: [$directory/$basefile]"
       remove_cached
-      touch "$LAYOUTFILE"
+      touch "$DSB_LAYOUT"
     fi
   done
 }
@@ -535,15 +538,22 @@ INOTIFY_PID=$?
 waiting="yes"
 while read -u $FIFO_FD -r inotifyline; do
 
+  # the main layout file we are watching
+  for i in "$SMB"/[lL][aA][yY][oO][uU][tT]\.[dD][sS][bB][dD]; do
+    # full path of symlink
+    DSB_LAYOUT_LINK="$i"
+    # full path of current layout
+    DSB_LAYOUT="$SMB"/`readlink $DSB_LAYOUT_LINK`
+  done
+
   # wait for inotify to be ready
   if [ "$waiting" = "yes" ]; then
     test "$inotifyline" = "Watches established." || continue
     waiting="no"
 
-    # touch all dsb files in smb root (force reading them)
-    for i in "$SMB"/[lL][aA][yY][oO][uU][tT]\.[dD][sS][bB][dD]; do
-      test -f "$i" && touch "$i"
-    done
+    # touch layout.dsbd file in smb root, so it get's read
+    log "Layout init: [$DSB_LAYOUT]"
+    touch "$DSB_LAYOUT"
     continue
   fi
 
@@ -569,8 +579,9 @@ while read -u $FIFO_FD -r inotifyline; do
   [ "${basefile:0:1}" = "~" ] && continue
 
   # debugging:
-  log "filename($filename) e($event) $x"
-  log "directory($directory) basefile($basefile) e($event)"
+  # log "event($event)"
+  # log "fullpath=($fullpath)  filename($filename)"
+  # log "directory($directory) basefile($basefile)"
   # continue
 
   # create / delete
