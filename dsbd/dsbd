@@ -1,10 +1,11 @@
 #!/bin/bash
+
+#############################################
 #
 # dsbd daemon written in shell
 #
 # ctime: 2015-12-18 /TR
-# mtime: 2017-01-19 /TR
-# version: 0.18
+# mtime: 2017-02-04 /TR
 #############################################
 
 SMB="$1"
@@ -13,11 +14,22 @@ LOG="$3"
 FIFO="$4"
 CACHE="$5"
 
+# version information
+DSB_VERSION="DSBD 0.19"
+
 # javascript files and templates
 LIBFILES="/var/lib/dsbd"
 
-# time in seconds
+# reload delay time
+# - chrome client should check for changes in the id file "if_X.html.txt"
+# - time in seconds
 DSB_RELOAD_TIME="5"
+
+# dsbd will check for changes in news feeds
+# - time is in seconds
+DSB_NEWSFEED_CHECK="300"
+
+# mutool quality settings for the pdf output
 PDF_QUALITY="-r 110"
 
 exec 1>>$LOG
@@ -48,12 +60,15 @@ hashsum() {
 
 # called once in beginning
 startup() {
-  log "START SERVICE"
+  log "START SERVICE ($DSB_VERSION)"
 
   # test for some tools, which are needed
+  test -x /usr/bin/curl || error "Need curl!"
   test -x /usr/bin/rsync || error "Need rsync!"
   test -x /usr/bin/ffmpeg || error "Need ffmpeg!"
+  test -x /usr/bin/md5sum || error "Need md5sum!"
   test -x /usr/bin/mutool || error "Need mutool!"
+  test -x /usr/bin/convert || error "Need convert!"
   test -x /usr/bin/dos2unix || error "Need dos2unix!"
   test -x /usr/bin/libreoffice || error "Need libreoffice!"
 
@@ -78,7 +93,7 @@ EOF
 
   # Update Samba Templates (from System Templates)
   if [ ! -d "$SMB/Templates" ]; then
-    log "Erstelle Samba Template Dateien..."
+    log "Creating Template Files..."
     mkdir -p "$SMB/Templates"
     rsync -aqu "$LIBFILES/Templates/" "$SMB/Templates/"
   fi
@@ -88,7 +103,7 @@ EOF
 
 # called once on end
 cleanup() {
-  log "END SERVICE"
+  log "END SERVICE ($DSB_VERSION)"
   kill $INOTIFY_PID
   exit 0
 }
@@ -104,7 +119,7 @@ clean_fifo() {
     # echo "ignoring line: [$ignored]"
   done
   if [ "$counter" != "0" ]; then
-    log "Ignorierte Inotify's: $counter"
+    log "Ignored Inotify's: $counter"
     # reload site, so no update gets lost
     touch "$DSB_LAYOUT"
   fi
@@ -252,6 +267,34 @@ read_mediafiles() {
   MEDIAFILES=`cat "$CACHE/if_$Id.media"`
 }
 
+# newsfeeds
+read_newsfeed_recheck() {
+  DSB_FEEDURL=`read_template_file "#Feed.txt"|head -1`
+
+  # endless loop
+  while :; do
+    # log "read_newsfeed_recheck id($Id) @ `date`"
+
+    # These headers should give us an unique ID:
+    # 1) Last-Modified: Sat, 28 Jan 2017 08:18:28 GMT
+    # 2) Content-Length: 10474
+    # - when these headers are not present, update every time...
+    ID_OLD="0"
+    test -f "$CacheDir/feed.id" && ID_OLD=`cat $CacheDir/feed.id`
+    ID_NEW=`curl -s -A "$DSB_VERSION" -I "$DSB_FEEDURL" | grep -E '^(Last-Modified|Content-Length)'|hashsum 32`
+    ID_EMPTY=`echo -n|hashsum 32`
+    log "FeedID new=$ID_NEW old=$ID_OLD empty=$ID_EMPTY"
+    if [ "$ID_OLD" != "$ID_NEW" -o "$ID_NEW" == "$ID_EMPTY" ]; then
+      log "Updating Feed, url=$DSB_FEEDURL ..."
+      curl -s -A "$DSB_VERSION" "$DSB_FEEDURL" > "$CacheDir/feed.xml"
+      echo $ID_NEW > "$CacheDir/feed.id"
+      echo $ID_NEW | cut -b1-10 > "$WEB/if_$Id.html.txt"
+      ln -s -f "$CacheDir/feed.xml" "$WEB/if_$Id/feed.xml"
+    fi
+    sleep $DSB_NEWSFEED_CHECK
+  done
+}
+
 # Inhalt eines Templates lesen und zurück geben
 read_template_file() {
   # log "read_template_file $1"
@@ -264,11 +307,25 @@ read_template_file() {
   done
 }
 
+# newsfeeds
+read_newsfeed() {
+  # log "read_newsfeed id($Id)"
+  mkdir -p "$CacheDir" "$WEB/if_$Id"
+
+  # kill old job
+  test -f "$WEB/if_$Id/feed.pid" && kill `cat "$WEB/if_$Id/feed.pid"` 2>/dev/null
+
+  # start new job and save id
+  read_newsfeed_recheck &
+  echo $! > "$WEB/if_$Id/feed.pid"
+}
+
 # -> setzt diese Variable: $LAYOUT
 read_template_files() {
   LAYOUT=`read_template_file "#Layout.txt"`
   FILES=`echo "$LAYOUT" | grep -E '%\w*%' | grep -vE '(DSB_|IFRAME_)' | cut -d% -f2`
 
+  # work with the "Templates"
   # alle %xyz% platzhalter ersetzen
   for x in $FILES; do
     # Ticker und Mediafiles sind anders!
@@ -277,7 +334,7 @@ read_template_files() {
   done
 
   # reload kann überall drinnen sein
-  RELOAD="dsb_checkreload(\"if_$Id.html.hashstr\", $DSB_RELOAD_TIME); <!-- Update @ `date` -->"
+  RELOAD="dsb_checkreload(\"if_$Id.html.txt\", $DSB_RELOAD_TIME); <!-- Update @ `date` -->"
   LAYOUT=${LAYOUT/'%DSB_RELOAD%'/"$RELOAD"}
 }
 
@@ -309,12 +366,19 @@ generate_iframe_slideshow() {
   LAYOUT=${LAYOUT/'%DSB_MEDIA%'/"$MEDIAFILES"}
 }
 
+# Newsfeed (Atom xml, rss, rdf)
+generate_iframe_newsfeed() {
+  read_template_files
+  read_newsfeed
+  LAYOUT=${LAYOUT/'%DSB_FEED%'/"'if_$Id/feed.xml'"}
+}
+
 # das Frameset erzeugen
 generate_index() {
   UserDir="$SMB/$Section"
   CacheDir="$CACHE/$Section"
 
-  log "Erstelle Index($Id), Type=$Type, Section=$Section"
+  log "Creating Index($Id), Type=$Type, Section=$Section"
 
   # Update User Template from Samba Template
   rsync -aqu "$SMB/Templates/$Type/" "$UserDir/"
@@ -331,7 +395,7 @@ generate_index() {
 
   # generate frameset and hashsum of it
   echo "$LAYOUT" > "$WEB/if_$Id.html"
-  cat "$WEB/if_$Id.html" | hashsum 10 > "$WEB/if_$Id.html.hashstr"
+  cat "$WEB/if_$Id.html" | hashsum 10 > "$WEB/if_$Id.html.txt"
   ln -s -f "if_$Id.html" "$WEB/index.html"
 }
 
@@ -343,9 +407,9 @@ generate_iframe() {
   # Update User Template from Samba Template
   rsync -aqu "$SMB/Templates/$Type/" "$UserDir/"
 
-  log "Erstelle Frame($Id), Type=$Type, Section=$Section"
+  log "Creating Frame($Id), Type=$Type, Section=$Section"
   case "$Type" in
-    "Wetter")
+    "Weather")
       read_template_files
       ;;
     "Ticker")
@@ -354,23 +418,27 @@ generate_iframe() {
     "SlideShow")
       generate_iframe_slideshow
       ;;
-    "Uhr")
-      read_template_files
-      ;;
-    "Webseite")
-      read_template_files
-      ;;
     "Newsfeed")
+      generate_iframe_newsfeed
+      ;;
+    "Clock")
       read_template_files
+      ;;
+    "Website")
+      read_template_files
+      ;;
+    *)
+      log "Frame($Id) ignored, unknown type [$Type]!"
+      return
       ;;
   esac
 
   # generate iframe and hashsum of it
   echo "$LAYOUT" > "$WEB/if_$Id.html"
-  cat "$WEB/if_$Id.html" | hashsum 10 > "$WEB/if_$Id.html.hashstr"
+  cat "$WEB/if_$Id.html" | hashsum 10 > "$WEB/if_$Id.html.txt"
 
   # style
-  STYLES[$Id]=`read_template_file "#Rahmen.txt"`
+  STYLES[$Id]=`read_template_file "#Border.txt"`
   echo -e "iframe#id$Id {
   position: fixed;
   top: ${TOP[$Id]};
@@ -393,7 +461,7 @@ generate_site() {
 
   # 1b) Update Samba Templates (from System Templates)
   if [ ! -d "$SMB/Templates" ]; then
-    log "Erstelle Samba Template Dateien..."
+    log "Syncing Template Files..."
     mkdir -p "$SMB/Templates"
     rsync -aqu "$LIBFILES/Templates/" "$SMB/Templates/"
   fi
@@ -457,7 +525,7 @@ remove_layout() {
     unset HEIGHT[$i]
     rm -rf "$WEB/$s" "$WEB/js/" "$WEB/if_$i."* "$WEB/if_$i" "$WEB/index."* "$CACHE"/*
     # remove old layout, when no #keep.txt exists
-    # -> disabled, currently not relly usefull
+    # -> disabled, currently not really useful
     # test -f "$SMB/$s/#keep.txt" || rm -rf "$SMB/$s"
   done
 }
@@ -468,7 +536,7 @@ remove_cached() {
   CacheDir="$CACHE/$Section"
   File=`basename "$filename"`
   hashstr=`echo "$CacheDir/$File.d/$File"|hashsum 32`
-  # log "Cache geleert: $File, hashstr:$hashstr"
+  # log "Cache flushed: $File, hashstr:$hashstr"
 
   # remove old cached files
   rm -rf "$CacheDir/$File"*
@@ -484,7 +552,7 @@ handle_create() {
 
   # check, if current layout has changed
   if [ "$fullpath" = "$DSB_LAYOUT" ]; then
-    log "Layout einlesen: [$DSB_LAYOUT]"
+    log "Layout Reading: [$DSB_LAYOUT]"
     cat "$DSB_LAYOUT" | dos2unix | iconv -f latin1 -t utf8 > "$CACHE/$basefile"
     read_layout "$CACHE/$basefile"
     rm -f "$CACHE/$basefile"
@@ -494,7 +562,7 @@ handle_create() {
   for i in ${!SECTIONS[@]}; do
     Section="${SECTIONS[$i],,}"
     if [ "${directory}" = "$Section" ]; then
-      log "Datei erstellt/geändert:  [$directory/$basefile]"
+      log "File created/changed:  [$directory/$basefile]"
       generate_site
     fi
   done
@@ -506,7 +574,7 @@ handle_delete() {
 
   # special file "layout.dsbd"
   if [ "$fullpath" = "$DSB_LAYOUT" ]; then
-    log "Layout enfernt..."
+    log "Layout Removed: [$DSB_LAYOUT]"
     remove_layout
   fi
 
@@ -514,7 +582,7 @@ handle_delete() {
   for i in ${!SECTIONS[@]}; do
     Section="${SECTIONS[$i],,}"
     if [ "${directory}" = "$Section" ]; then
-      log "Datei gelöscht: [$directory/$basefile]"
+      log "File deleted: [$directory/$basefile]"
       remove_cached
       touch "$DSB_LAYOUT"
     fi
@@ -532,7 +600,7 @@ declare -A "SECTIONS" "TYPES" "LEFT" "TOP" "WIDTH" "HEIGHT" "STYLES"
 inotifywait --monitor --recursive \
   --event create,close_write,delete,moved_to,moved_from \
   --format "|%w%f|%e|" "$SMB" > "$FIFO" 2>&1 &
-INOTIFY_PID=$?
+INOTIFY_PID=$!
 
 # big loop, which starts things on some events
 waiting="yes"
@@ -552,7 +620,7 @@ while read -u $FIFO_FD -r inotifyline; do
     waiting="no"
 
     # touch layout.dsbd file in smb root, so it get's read
-    log "Layout init: [$DSB_LAYOUT]"
+    log "Layout Init: [$DSB_LAYOUT]"
     touch "$DSB_LAYOUT"
     continue
   fi
