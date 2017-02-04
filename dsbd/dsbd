@@ -283,7 +283,7 @@ read_newsfeed_recheck() {
     test -f "$CacheDir/feed.id" && ID_OLD=`cat $CacheDir/feed.id`
     ID_NEW=`curl -s -A "$DSB_VERSION" -I "$DSB_FEEDURL" | grep -E '^(Last-Modified|Content-Length)'|hashsum 32`
     ID_EMPTY=`echo -n|hashsum 32`
-    log "FeedID new=$ID_NEW old=$ID_OLD empty=$ID_EMPTY"
+    # log "FeedID new=$ID_NEW old=$ID_OLD empty=$ID_EMPTY"
     if [ "$ID_OLD" != "$ID_NEW" -o "$ID_NEW" == "$ID_EMPTY" ]; then
       log "Updating Feed, url=$DSB_FEEDURL ..."
       curl -s -A "$DSB_VERSION" "$DSB_FEEDURL" > "$CacheDir/feed.xml"
