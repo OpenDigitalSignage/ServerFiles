@@ -427,6 +427,18 @@ generate_iframe() {
     "Website")
       read_template_files
       ;;
+    "Wetter")
+      # obsolete, Wetter -> Weather
+      read_template_files
+      ;;
+    "Uhr")
+      # obsolete, Uhr -> Clock
+      read_template_files
+      ;;
+    "Webseite")
+      # obsolete, Webseite -> Website
+      read_template_files
+      ;;
     *)
       log "Frame($Id) ignored, unknown type [$Type]!"
       return
@@ -439,6 +451,9 @@ generate_iframe() {
 
   # style
   STYLES[$Id]=`read_template_file "#Border.txt"`
+
+  # test for old #Rahmen.txt value
+  test -z STYLES[$Id] && STYLES[$Id]=`read_template_file "#Rahmen.txt"`
   echo -e "iframe#id$Id {
   position: fixed;
   top: ${TOP[$Id]};
