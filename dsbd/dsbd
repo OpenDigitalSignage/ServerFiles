@@ -1,8 +1,7 @@
 #!/bin/bash
 
 #############################################
-#
-# dsbd daemon written in shell
+# DSBD - Digital Signage Background Daemon
 #
 # ctime: 2015-12-18 /TR
 # mtime: 2017-02-04 /TR
