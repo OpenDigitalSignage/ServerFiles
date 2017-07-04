@@ -5,7 +5,7 @@
 #
 # ctime:   2016-08-25 /TR
 # mtime:   2016-08-26 /TR
-# version: 0.5
+# version: 0.3a
 #
 # -> run it via cron like this:
 # */1 * * * * /usr/sbin/dsbs "dsb1"

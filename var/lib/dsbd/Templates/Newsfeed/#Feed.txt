@@ -1,0 +1,2 @@
+https://www.heise.de/autos/rss/news-atom.xml
+https://jobs.heise.de/rss.xml

@@ -1,17 +1,8 @@
-
 body {
   font-family: Tahoma, Genevam, sans-serif;
 
   /* kommt auf den ticker an, hier die Schriftgröße anpassen /TR */
-  font-size: 4vh;
-}
-
-/* sonst werden die links unterstrichen */
-a {
-  /* Schriftfarbe der Links /TR */
-  color: #000;
-
-  text-decoration: none;
+  font-size: 3vh;
 }
 
 .rssHeader {
@@ -24,7 +15,12 @@ a {
   background-color: rgba(203, 203, 203, 0.5);
 }
 
+ul {
+  list-style-type: none;
+}
+
 #news li {
+  list-style-type: none;
   margin: 0.5vh;
   padding: 0.5vh;
 }

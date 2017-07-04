@@ -1,10 +1,19 @@
-/*
-* Tadas Juozapaitis ( kasp3rito@gmail.com )
-*
-* Modifed by Zazar:
-* 24.06.2011 - Corrected pausing issue with multiple instances
-*
-*/
+
+/**
+ * Copyright © 2017 Tino Reichardt (milky at Open-Digital-Signage dot org)
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License Version 2, as
+ * published by the Free Software Foundation.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * Based on code by Tadas Juozapaitis <kasp3rito at gmail.com> and Zazar
+ * Homepage: https://github.com/mcmilk/jquery.vticker/
+ */
 
 (function($){
 
@@ -13,8 +22,6 @@ $.fn.vTicker = function(options) {
 		speed: 700,
 		pause: 4000,
 		showItems: 3,
-		animation: '',
-		mousePause: true,
 		isPaused: false,
 		maxHeight: 33
 	};
@@ -32,12 +39,7 @@ $.fn.vTicker = function(options) {
 	        	$(this).css('top', '0vh');
         	});
 		
-		if(options.animation == 'fade') {
-			obj.children('li:first').fadeOut(options.speed);
-			obj.children('li:last').hide().fadeIn(options.speed);
-		}
-
-	    	first.appendTo(obj);
+		first.appendTo(obj);
 	};
 	
 	return this.each(function() {
@@ -56,15 +58,7 @@ $.fn.vTicker = function(options) {
 		obj.height(maxHeight * options.showItems + "vh");
 		
     		var interval = setInterval(function(){ moveUp(obj, maxHeight, itempause); }, options.pause);
-		
-		if (options.mousePause)
-		{
-			obj.bind("mouseenter",function() {
-				itempause = true;
-			}).bind("mouseleave",function() {
-				itempause = false;
-			});
-		}
 	});
 };
+
 })(jQuery);

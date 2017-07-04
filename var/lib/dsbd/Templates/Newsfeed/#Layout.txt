@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+  <title>DSB Newsfeed</title>
+  <meta charset="utf-8">
+  <script type="text/javascript" src="js/jquery.min.js"></script>
+  <script type="text/javascript" src="js/dsb.js"></script>
+  <script type="text/javascript" src="js/jquery.getFeed.js"></script>
+  <script type="text/javascript" src="js/jquery.vticker.js"></script>
+
+  <style>%STYLE%</style>
+</head>
+
+<body>
+  <div id="news"></div>
+  <script type="text/javascript">
+
+  jQuery(function() {
+   jQuery.getFeed({
+    url: %DSB_FEED%,
+    success: function(feed) {
+     var html = '<div class="rssHeader">';
+     html += feed.title + ' - ' + feed.description + '</div>';
+     html += '<div class="rssBody"><ul>';
+     for (var i = 0; i < feed.items.length && i < 5; i++) {
+       var flip = "even";
+       if (i & 1) {
+         flip = "odd";
+       }
+       var item = feed.items[i];
+       html += '<li class="' + flip + '"><b>' + item.title + '</b><p>' + item.description + '</li>';
+     }
+     html += '</ul></div>';
+     jQuery('#news').append(html);
+
+     $('div.rssBody').vTicker({
+      mousePause: false,
+
+      /* Speed der Animation bei Wechsel */
+      speed: 700,
+
+      /* Anzeigedauer eines Eintrages */
+      pause: 4000,
+
+      /* Anzahl Einträge */
+      showItems: 3,
+
+      /* Höhe per Feed in Prozent */
+      maxHeight: 47,
+     });
+    }
+   });
+  });
+
+  %DSB_RELOAD%
+  </script>
+</body>
+</html>
