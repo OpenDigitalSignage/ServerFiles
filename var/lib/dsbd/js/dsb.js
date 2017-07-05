@@ -10,7 +10,7 @@
 var debug = 0;
 function log() {
   if (window.console && console.log && debug)
-    console.log('[dsb] ' + Array.prototype.join.call(arguments,' '));
+    console.log('[dsbd] ' + Array.prototype.join.call(arguments,' '));
 }
 
 /**

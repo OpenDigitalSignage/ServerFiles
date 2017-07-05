@@ -4,7 +4,7 @@
 # DSBD - Digital Signage Background Daemon
 #
 # ctime: 2015-12-18 /TR
-# mtime: 2017-02-04 /TR
+# mtime: 2017-07-05 /TR
 #############################################
 
 SMB="$1"
@@ -297,10 +297,7 @@ read_newsfeed_recheck() {
 # Inhalt eines Templates lesen und zurück geben
 read_template_file() {
   # log "read_template_file $1"
-  File="$1"
-
-  # log "find \"$UserDir\" -iname \"$File\""
-  find "$UserDir" -iname "$File" | while read f; do
+  find "$UserDir" -iname "$1" | while read f; do
     # \r\n -> \n + utf8 BOM weg machen
     cat "$f" | dos2unix | sed -e 's/\xef\xbb\xbf//g'
   done
@@ -448,11 +445,9 @@ generate_iframe() {
   echo "$LAYOUT" > "$WEB/if_$Id.html"
   cat "$WEB/if_$Id.html" | hashsum 10 > "$WEB/if_$Id.html.txt"
 
-  # style
-  STYLES[$Id]=`read_template_file "#Border.txt"`
+  # obsolete style: Rahmen -> Border
+  STYLES[$Id]=`read_template_file "#Border.txt";read_template_file "#Rahmen.txt"`
 
-  # test for old #Rahmen.txt value
-  test -z STYLES[$Id] && STYLES[$Id]=`read_template_file "#Rahmen.txt"`
   echo -e "iframe#id$Id {
   position: fixed;
   top: ${TOP[$Id]};

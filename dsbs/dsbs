@@ -17,9 +17,9 @@ if [ -z $1 ]; then
   exit 1
 fi
 
-SMB_PREFIX="/home/dsb"
-WEB_PREFIX="/var/www/html/dsb"
-USRGRP="dsb.dsb"
+SMB_PREFIX="/home/dsbd"
+WEB_PREFIX="/var/www/html/dsbd"
+USRGRP="dsbd.dsbd"
 
 SMB="$SMB_PREFIX/$1"
 WEB="$WEB_PREFIX/$1/status.txt"
