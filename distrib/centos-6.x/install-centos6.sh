@@ -35,11 +35,12 @@ yum update -y
 # you can also build it yourself, if you want...
 yum install -y https://open-digital-signage.org/dl/mupdf-1.8-1.el6.x86_64.rpm
 
-# 5) tmux, bash-completion, libreoffice, ...
+# 5) tmux, bash-completion, libreoffice, etc
 yum install -y tmux bash-completion system-config-network-tui \
  setuptool vim sshfs wget hdparm smartmontools htop man man-pages \
- rsync dos2unix libreoffice httpd samba inotify-tools daemonize \
- ffmpeg ImageMagick
+ rsync dos2unix httpd samba inotify-tools daemonize ffmpeg \
+ ImageMagick unoconv libreoffice libreoffice-headless \
+ libreoffice-filters openoffice.org-diafilter libreoffice-graphicfilter
 
 #########################################################################################################
 # now some setup:
