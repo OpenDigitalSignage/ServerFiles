@@ -98,7 +98,7 @@ chkconfig smb on
 rm -f /etc/skel/*
 useradd $USERNAME -N
 echo "$USERNAME:$USERPASS" | chpasswd
-echo -e "$USERNAME\n$USERPASS\n" | smbpasswd -s -a $USERNAME
+echo -e "$USERPASS\n$USERPASS\n" | smbpasswd -s -a $USERNAME
 smbpasswd -e $USERNAME
 
 # disable unwanted/unneeded services
@@ -107,13 +107,12 @@ chkconfig iptables off
 chkconfig ip6tables off
 
 # move dsbd and dsbs to /usr/sbin:
-cp ServerFiles/dsbd/dsbd /usr/sbin/dsbd
-cp ServerFiles/dsbs/dsbs /usr/sbin/dsbs
 
 #############################################################################
 # - now you have to add the init scripts you want to /etc/rc.d/init.d
 #
-# 1) cp distrib/centos-6.x/dsbd-sample /etc/rc.d/init.d/dsbd-sample
-# 2) chmod +x /etc/rc.d/init.d/dsbd-sample
-# 3) chkconfig dsbd-sample on
+# 1)  cp ServerFiles/dsbd/dsbd /usr/sbin/dsbd
+# 2)  cp ServerFiles/dsbs/dsbs /usr/sbin/dsbs
+# 3a) cp distrib/centos-6.x/dsbd-sample /etc/rc.d/init.d/dsbd-sample
+# 3b) chkconfig dsbd-sample on
 #############################################################################
