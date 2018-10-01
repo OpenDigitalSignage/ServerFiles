@@ -12,7 +12,7 @@ Files for the Server of your Digital Signage System
 ## Ubuntu LTS 18.04
 
 - new systems are using systemd services
-- so 
+- the files of this version are kept in "distrib/Ubuntu-18.04-LTS"
 
 
 ## German Intruduction to the DSBD System with CentOS 6.x (2017)
