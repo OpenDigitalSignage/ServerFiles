@@ -1,4 +1,4 @@
 
 # Files for different distributions
 
-Here are the start stop scripts, required by your favorite distri.
+Here are the start stop scripts, required by your favorite Linux distribution.

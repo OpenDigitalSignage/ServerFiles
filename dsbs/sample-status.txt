@@ -1,5 +1,0 @@
-SHUTDOWN=0
-NOTE=weekplan
-LAYOUT=Layout1
-TIME=0730-1230
-DOW=5

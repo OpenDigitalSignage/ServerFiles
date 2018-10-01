@@ -1,0 +1,707 @@
+#!/bin/bash
+
+#############################################
+# DSBD - Digital Signage Background Daemon
+#
+# ctime: 2015-12-18 /TR
+# mtime: 2018-08-30 /TR
+#
+# -> run it via systemd "dsbd-$name.service"
+#############################################
+
+SMB="/home/dsbd/$DSB_NAME"
+WEB="/var/www/html/dsbd/$DSB_NAME"
+LOG="/var/log/dsbd/$DSB_NAME.log"
+CACHE="$DSB_RUNDIR/$DSB_NAME.d"
+FIFO="$CACHE/$DSB_NAME.fifo"
+
+# version information
+DSB_VERSION="DSBD 0.20"
+
+# javascript files and templates
+LIBFILES="/var/lib/dsbd"
+
+# reload delay time (seconds)
+DSB_RELOAD_TIME="5"
+
+# dsbd will recheck for changes @ news feeds (seconds)
+DSB_NEWSFEED_CHECK="300"
+
+# mutool quality settings for the pdf output
+PDF_QUALITY="-r 110"
+
+# log sth.
+log() {
+  d=`date "+%Y-%m-%d %H:%M:%S"`
+  echo "[$d] $*" >> $LOG
+}
+
+# exit with some error
+error() {
+  log "$*"
+  exit 1
+}
+
+# give some hashsum of input to output
+hashsum() {
+  HASHLEN=32
+  test -z $1 || HASHLEN=$1
+  cat | md5sum | cut -b1-$HASHLEN
+}
+
+# called once in beginning
+startup() {
+
+  # when run as root, init the directories and exit (systemd PreStart)
+  cd /tmp || error "cd /tmp failed!"
+  if [ $EUID == 0 ]; then
+    for d in "$CACHE" `dirname "$LOG"` `dirname "$SMB"` `dirname "$WEB"`; do
+      mkdir -p "$d"
+      chown -R $DSB_USER "$d" || error "chown -R $DSB_USER $d failed!"
+    done
+    exit 0
+  fi
+
+  # stdout, stderr and the dsbd fifo
+  exec 1>>$LOG
+  exec 2>&1
+  rm -f ${FIFO}
+  mkfifo ${FIFO}
+  exec 23<>${FIFO}
+  FIFO_FD=23
+
+  log "START SERVICE ($DSB_VERSION)"
+
+  # test for some tools, which are needed
+  test -x /usr/bin/curl || error "Need curl!"
+  test -x /usr/bin/rsync || error "Need rsync!"
+  test -x /usr/bin/md5sum || error "Need md5sum!"
+  test -x /usr/bin/mutool || error "Need mutool!"
+  test -x /usr/bin/convert || error "Need convert!"
+  test -x /usr/bin/unoconv || error "Need unoconv / libreoffice!"
+  test -x /usr/bin/dos2unix || error "Need dos2unix!"
+
+  # register cleanup function
+  trap cleanup SIGHUP SIGINT SIGTERM SIGQUIT
+
+  # libreoffice setup, we want nice pdf output!
+  # https://wiki.openoffice.org/wiki/API/Tutorials/PDF_export
+  CFG="$HOME/.config/libreoffice/4/user/registrymodifications.xcu"
+  mkdir -p `dirname $CFG`
+  cat <<EOF > $CFG
+<?xml version="1.0" encoding="UTF-8"?>
+<oor:items xmlns:oor="http://openoffice.org/2001/registry" xmlns:xs="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+<item oor:path="/org.openoffice.Office.Common/Filter/PDF/Export"><prop oor:name="ExportFormFields" oor:op="fuse"><value>false</value></prop></item>
+<item oor:path="/org.openoffice.Office.Common/Filter/PDF/Export"><prop oor:name="IsAddStream" oor:op="fuse"><value>false</value></prop></item>
+<item oor:path="/org.openoffice.Office.Common/Filter/PDF/Export"><prop oor:name="MaxImageResolution" oor:op="fuse"><value>300</value></prop></item>
+<item oor:path="/org.openoffice.Office.Common/Filter/PDF/Export"><prop oor:name="ReduceImageResolution" oor:op="fuse"><value>true</value></prop></item>
+<item oor:path="/org.openoffice.Office.Common/Filter/PDF/Export"><prop oor:name="UseLosslessCompression" oor:op="fuse"><value>false</value></prop></item>
+<item oor:path="/org.openoffice.Office.Common/Filter/PDF/Export"><prop oor:name="SelectPdfVersion" oor:op="fuse"><value>1</value></prop></item>
+<item oor:path="/org.openoffice.Office.Common/Filter/PDF/Export"><prop oor:name="Quality" oor:op="fuse"><value>90</value></prop></item>
+EOF
+
+  # Update Samba Templates (from System Templates)
+  if [ ! -d "$SMB/Templates" ]; then
+    log "Creating Template Files..."
+    mkdir -p "$SMB/Templates"
+    rsync -aqu "$LIBFILES/Templates/" "$SMB/Templates/"
+    cat <<EOF > "$SMB/Standard.dsbd"
+[Layout]
+Left=400
+Top=314
+Resolution=0
+Type=Background
+EOF
+    cat <<EOF > "$SMB/DS-Schedule.dsbs"
+[Weekplan]
+[Offtimes]
+[Events]
+[Macs]
+EOF
+  unix2dos "$SMB/Standard.dsbd"
+  unix2dos "$SMB/DS-Schedule.dsbs"
+  fi
+
+  cd "$CACHE" || error "Could not change to cachedir $CACHE"
+}
+
+# called once on end
+cleanup() {
+  log "END SERVICE ($DSB_VERSION)"
+  exit 0
+}
+
+# called, when we know all other updates do not need more work
+clean_fifo() {
+  counter=0
+  while true; do
+    # no data @ pipe
+    read -t 0.01 -u $FIFO_FD ignored
+    test "$?" != "0" && break
+    counter=$((counter+1))
+    # echo "ignoring line: [$ignored]"
+  done
+  if [ "$counter" != "0" ]; then
+    log "Ignored Inotify's: $counter"
+    # reload site, so no update gets lost
+    touch "$DSB_LAYOUT"
+  fi
+}
+
+# <img> tag liste bauen...
+generate_img_list() {
+  echo -n > "$CacheDir/$File.img"
+  find "$CacheDir/$File.d" -name "*.png" | sort | while read f; do
+    hashstr=`echo $f|hashsum 32`
+    ln -s -f "$f" "$WEB/if_$Id/$hashstr.png"
+    echo "<img id=\"$hashstr\" src=\"if_$Id/$hashstr.png\" alt=\"\">" >> "$CacheDir/$File.img"
+  done
+}
+
+# -> direct ins web (jpg, gif usw)
+conv_direct() {
+  log "conv_direct -> $CacheDir/$File.img"
+  rm -rf "$CacheDir/$File.d"
+  mkdir -p "$CacheDir/$File.d"
+  ln -s "$CacheDir/$File" "$CacheDir/$File.d/$File"
+  # <img> liste machen
+  echo -n > "$CacheDir/$File.img"
+  find "$CacheDir/$File.d" -iname "*.$lcExt" | sort | while read f; do
+    hashstr=`echo $f|hashsum 32`
+    ln -s -f "$f" "$WEB/if_$Id/$hashstr.$lcExt"
+    echo "<img id=\"$hashstr\" src=\"if_$Id/$hashstr.$lcExt\" alt=\"\">" >> "$CacheDir/$File.img"
+  done
+}
+
+# -> direct ins web, aber video tag
+conv_video() {
+  log "conv_video -> $CacheDir/$File.video"
+  rm -rf "$CacheDir/$File.d"
+  mkdir -p "$CacheDir/$File.d"
+  ln -s "$CacheDir/$File" "$CacheDir/$File.d/$File"
+  # <video> liste machen
+  echo -n > "$CacheDir/$File.video"
+  find "$CacheDir/$File.d" -iname "*.$lcExt" | sort | while read f; do
+    hashstr=`echo $f|hashsum 32`
+    ln -s -f "$f" "$WEB/if_$Id/$hashstr.$lcExt"
+    echo "<video id=\"$hashstr\" src=\"if_$Id/$hashstr.$lcExt\" controls></video>" >> "$CacheDir/$File.video"
+  done
+}
+
+# convert image file via Image Magick comvert tool to png
+conv_images() {
+  log "conv_image -> $CacheDir/$File.img"
+  rm -rf "$CacheDir/$File.d"
+  mkdir -p "$CacheDir/$File.d"
+  convert "$CacheDir/$File" "$CacheDir/$File.d/$File.png"
+  generate_img_list
+}
+
+# pdf, xps, cbz, and epub -> png
+conv_mutool() {
+  log "conv_mutool -> $CacheDir/$File.img"
+  rm -rf "$CacheDir/$File.d"
+  mkdir -p "$CacheDir/$File.d"
+  mutool draw $PDF_QUALITY -o "$CacheDir/$File.d/$File_%03d.png" "$CacheDir/$File"
+  generate_img_list
+}
+
+# office -> pdf -> png
+# - wichtig, libreoffice einmal starten und pdf export qualität festlegen
+conv_office() {
+  log "conv_office -> $CacheDir/$File.img"
+  rm -rf "$CacheDir/$File.d"
+  mkdir -p "$CacheDir/$File.d"
+  cp "$CacheDir/$File" "$CacheDir/$File.d"
+  # man muß in das verzeichnis gehen...
+  cd "$CacheDir/$File.d"
+  # office nach pdf: (lala.doc -> lala.pdf)
+  unoconv -f pdf --pipe="pipe$$" "$File"
+  rm -f "$File"
+  # pdf nach png:
+  FileNoExt=${File%.*}
+  mutool draw $PDF_QUALITY -o "$File_%03d.png" "$FileNoExt.pdf"
+  rm -f "$FileNoExt.pdf"
+  cd "$CACHE"
+  generate_img_list
+}
+
+# eine mediendatei konvertieren und in den cache schieben
+# -> schon gesetzt: UserDir, CacheDir, File
+cache_file() {
+  Ext=${File##*.}
+  lcExt=${Ext,,}
+  # log "cache_file() UserDir=$UserDir, CacheDir=$CacheDir, File=$File, Ext=$Ext, lcExt=$lcExt"
+
+  # overwrite old one...
+  cp -p -f "$UserDir/$File" "$CacheDir/$File"
+
+  # filetypes
+  OFFICE=(cwk dxf cdr cmx dbf wk1 wks 123 hwp mml xls xlw xlt docx xlsx pptx pxl psw ppt pps pot rtf doc dot vsd psd odt ods odp odb odg odf sxw stw sxc sxi sti sxd std sxm wb2 wmf wpd wps)
+  VIDEOS=(avi mp4 m4v ogm ogv ogg webm)
+  MUTOOL=(pdf xps cbz epub)
+  IMAGES=(pcx bmp)
+  DIRECT=(jpg jpeg png gif)
+
+  for e in ${OFFICE[@]}; do
+    test "$lcExt" = "$e" && conv_office
+  done
+  for e in ${VIDEOS[@]}; do
+    test "$lcExt" = "$e" && conv_video
+  done
+  for e in ${MUTOOL[@]}; do
+    test "$lcExt" = "$e" && conv_mutool
+  done
+  for e in ${IMAGES[@]}; do
+    test "$lcExt" = "$e" && conv_images
+  done
+  for e in ${DIRECT[@]}; do
+    test "$lcExt" = "$e" && conv_direct
+  done
+}
+
+# Bilder und andere Mediendateien einlesen bzw. konvertieren
+read_mediafiles() {
+  # log "read_mediafiles id($Id)"
+  mkdir -p "$CacheDir" "$WEB/if_$Id"
+
+  # für alle Dateien im SlideShow / Layout Ordner, die nicht *.txt sind:
+  echo -n > "$CACHE/if_$Id.media"
+  find "$UserDir" -maxdepth 1 -type f \! -iname "*.txt" | sort | while read F; do
+    File=`basename "$F"`
+
+    # noch nicht im cache oder unterschiedliche größe
+    test ! -f "$CacheDir/$File" && cache_file
+    x1=`stat --printf "%s-%Y" "$UserDir/$File"`
+    x2=`stat --printf "%s-%Y" "$CacheDir/$File"`
+    # log "read_mediafiles x1=$x1 / x2=$x2"
+    test $x1 != "$x2" && cache_file
+
+    # .img bzw .video files wurden beim konvertieren erstellt
+    test -f "$CacheDir/$File.img" && cat "$CacheDir/$File.img" >> "$CACHE/if_$Id.media"
+    test -f "$CacheDir/$File.video" && cat "$CacheDir/$File.video" >> "$CACHE/if_$Id.media"
+  done
+
+  MF=`cat "$CACHE/if_$Id.media" | wc -l`
+  if [ "x$MF" = "x1" ]; then
+    cat "$CACHE/if_$Id.media" \
+    | sed -e 's/id="\w*"/id="2"/g' >> "$CACHE/if_$Id.media"
+  fi
+  MEDIAFILES=`cat "$CACHE/if_$Id.media"`
+}
+
+# newsfeeds
+read_newsfeed_recheck() {
+  DSB_FEEDURL=`read_template_file "#Feed.txt"|head -1`
+
+  # endless loop
+  while :; do
+    log "read_newsfeed_recheck id($Id) @ `date`"
+
+    # These headers should give us an unique ID:
+    # 1) Last-Modified: Sat, 28 Jan 2017 08:18:28 GMT
+    # 2) Content-Length: 10474
+    # - when these headers are not present, update every time...
+    ID_OLD="0"
+    test -f "$CacheDir/feed.id" && ID_OLD=`cat "$CacheDir/feed.id"`
+    ID_NEW=`curl -s -A "$DSB_VERSION" -I "$DSB_FEEDURL" | grep -E '^(Last-Modified|Content-Length)'|hashsum 32`
+    ID_EMPTY=`echo -n|hashsum 32`
+    # log "FeedID new=$ID_NEW old=$ID_OLD empty=$ID_EMPTY"
+    if [ "$ID_OLD" != "$ID_NEW" -o "$ID_NEW" == "$ID_EMPTY" ]; then
+      log "Updating Feed, url=$DSB_FEEDURL ..."
+      curl -s -A "$DSB_VERSION" "$DSB_FEEDURL" > "$CacheDir/feed.xml"
+      echo "$ID_NEW" > "$CacheDir/feed.id"
+      echo "$ID_NEW" | cut -b1-10 > "$WEB/if_$Id.html.txt"
+      ln -s -f "$CacheDir/feed.xml" "$WEB/if_$Id/feed.xml"
+    fi
+    sleep $DSB_NEWSFEED_CHECK
+  done
+}
+
+# Inhalt eines Templates lesen und zurück geben
+read_template_file() {
+  log "read_template_file $1"
+  find "$UserDir" -iname "$1" | while read f; do
+    # \r\n -> \n + utf8 BOM weg machen
+    cat "$f" | dos2unix | sed -e 's/\xef\xbb\xbf//g'
+  done
+}
+
+# newsfeeds
+read_newsfeed() {
+  log "read_newsfeed id($Id)"
+  mkdir -p "$CacheDir" "$WEB/if_$Id"
+
+  # kill old job
+  test -f "$WEB/if_$Id/feed.pid" && kill `cat "$WEB/if_$Id/feed.pid"` 2>/dev/null
+
+  # start new job and save id
+  read_newsfeed_recheck &
+  echo $! > "$WEB/if_$Id/feed.pid"
+}
+
+# -> setzt diese Variable: $LAYOUT
+read_template_files() {
+  LAYOUT=`read_template_file "#Layout.txt"`
+  FILES=`echo "$LAYOUT" | grep -E '%\w*%' | grep -vE '(DSB_|IFRAME_)' | cut -d% -f2`
+
+  # work with the "Templates"
+  # alle %xyz% platzhalter ersetzen
+  for x in $FILES; do
+    # Ticker und Mediafiles sind anders!
+    Content=`read_template_file "#$x.txt"`
+    LAYOUT=${LAYOUT/"%$x%"/"$Content"}
+  done
+
+  # reload kann überall drinnen sein
+  RELOAD="dsb_checkreload(\"if_$Id.html.txt\", $DSB_RELOAD_TIME); <!-- Update @ `date` -->"
+  LAYOUT=${LAYOUT/'%DSB_RELOAD%'/"$RELOAD"}
+}
+
+# Ticker bzw. Laufschrift
+generate_iframe_ticker() {
+  read_template_files
+
+  # set up ticker <li's>
+  DSB_TICKER=`read_template_file "#Ticker.txt"`
+  if [ ! -z "$DSB_TICKER" ]; then
+    TL=""
+    TT=""
+    TS=""
+    while read -r tline; do
+      TL="$TL<li>$tline</li>"
+      TT="$TT<p>$tline</p>"
+      TS="$TS &nbsp; &#x2981; &nbsp; &#x2981; &nbsp; &#x2981; &nbsp; $tline"
+    done <<< "$DSB_TICKER"
+    LAYOUT=${LAYOUT/'%DSB_TICKER%'/"$TL"}
+    LAYOUT=${LAYOUT/'%DSB_TICKER_TYPED%'/"$TT"}
+    LAYOUT=${LAYOUT/'%DSB_TICKER_SCROLLING%'/"$TS"}
+  else
+    LAYOUT=${LAYOUT/'%DSB_TICKER%'/" "}
+  fi
+}
+
+# SlideShow (Bilder und Videos)
+generate_iframe_slideshow() {
+  read_template_files
+  read_mediafiles
+  LAYOUT=${LAYOUT/'%DSB_MEDIA%'/"$MEDIAFILES"}
+}
+
+# Newsfeed (Atom xml, rss, rdf)
+generate_iframe_newsfeed() {
+  read_template_files
+  read_newsfeed
+  LAYOUT=${LAYOUT/'%DSB_FEED%'/"'if_$Id/feed.xml'"}
+}
+
+# das Frameset erzeugen
+generate_index() {
+  UserDir="$SMB/$Section"
+  CacheDir="$CACHE/$Section"
+
+  log "Creating Index($Id), Type=$Type, Section=$Section"
+
+  # Update User Template from Samba Template
+  rsync -aqu "$SMB/Templates/$Type/" "$UserDir/"
+  read_template_files
+
+  # style der iframes
+  IFRAME_STYLES=`cat "$CACHE/iframe-styles"`
+  IFRAME_LINKS=`cat "$CACHE/iframe-links"`
+  LAYOUT=${LAYOUT/'%IFRAME_STYLES%'/"$IFRAME_STYLES"}
+  LAYOUT=${LAYOUT/'%IFRAME_LINKS%'/"$IFRAME_LINKS"}
+
+  read_mediafiles
+  LAYOUT=${LAYOUT/'%DSB_MEDIA%'/"$MEDIAFILES"}
+
+  # generate frameset and hashsum of it
+  echo "$LAYOUT" > "$WEB/if_$Id.html"
+  cat "$WEB/if_$Id.html" | hashsum 10 > "$WEB/if_$Id.html.txt"
+  ln -s -f "if_$Id.html" "$WEB/index.html"
+}
+
+# einen IFrame erzeugen
+generate_iframe() {
+  UserDir="$SMB/$Section"
+  CacheDir="$CACHE/$Section"
+
+  # Update User Template from Samba Template
+  rsync -aqu "$SMB/Templates/$Type/" "$UserDir/"
+
+  log "Creating Frame($Id), Type=$Type, Section=$Section"
+  case "$Type" in
+    "Weather")
+      read_template_files
+      ;;
+    "Ticker")
+      generate_iframe_ticker
+      ;;
+    "SlideShow")
+      generate_iframe_slideshow
+      ;;
+    "Newsfeed")
+      generate_iframe_newsfeed
+      ;;
+    "Clock")
+      read_template_files
+      ;;
+    "Website")
+      read_template_files
+      ;;
+    "Wetter")
+      # obsolete, Wetter -> Weather
+      read_template_files
+      ;;
+    "Uhr")
+      # obsolete, Uhr -> Clock
+      read_template_files
+      ;;
+    "Webseite")
+      # obsolete, Webseite -> Website
+      read_template_files
+      ;;
+    *)
+      log "Frame($Id) ignored, unknown type [$Type]!"
+      return
+      ;;
+  esac
+
+  # generate iframe and hashsum of it
+  echo "$LAYOUT" > "$WEB/if_$Id.html"
+  cat "$WEB/if_$Id.html" | hashsum 10 > "$WEB/if_$Id.html.txt"
+
+  # obsolete style: Rahmen -> Border
+  STYLES[$Id]=`read_template_file "#Border.txt";read_template_file "#Rahmen.txt"`
+
+  echo -e "iframe#id$Id {
+  position: fixed;
+  top: ${TOP[$Id]};
+  left: ${LEFT[$Id]};
+  width: ${WIDTH[$Id]};
+  height: ${HEIGHT[$Id]};
+  ${STYLES[$Id]} \n}\n\n" >> "$CACHE/iframe-styles"
+
+  echo "<iframe id=\"id$Id\" src=\"if_$Id.html\" scrolling=\"no\"></iframe>" \
+    >> "$CACHE/iframe-links"
+}
+
+generate_site() {
+  # create directories / files in $SMB and $WEB
+  echo -n > "$CACHE/iframe-styles"
+  echo -n > "$CACHE/iframe-links"
+
+  # 1a) Update directories
+  rsync -qau "$LIBFILES/js/" "$WEB/js/"
+
+  # 1b) Update Samba Templates (from System Templates)
+  if [ ! -d "$SMB/Templates" ]; then
+    log "Syncing Template Files..."
+    mkdir -p "$SMB/Templates"
+    rsync -aqu "$LIBFILES/Templates/" "$SMB/Templates/"
+  fi
+
+  # 2) reset FIFO Queue
+  # wir bauen die ganze seite neu, alle anderen geänderten
+  # files machen wir also indirekt mit!
+  clean_fifo
+
+  # 3) nur die iframes generieren
+  for Id in ${!SECTIONS[@]}; do
+    Type="${TYPES[$Id]}"
+    test "$Type" = "Background" && continue
+    Section="${SECTIONS[$Id]}"
+    generate_iframe
+  done
+
+  # 4) nun den index für die iframes generieren
+  for Id in ${!SECTIONS[@]}; do
+    Type="${TYPES[$Id]}"
+    test "$Type" = "Background" || continue
+    Section="${SECTIONS[$Id]}"
+    generate_index
+  done
+
+  # 4) cleanup
+  rm -f "$CACHE/"iframe-*
+}
+
+# read layout file and set up the arrays:
+# SECTIONS + TYPES + TOP + ...
+read_layout() {
+  local i="-1"
+  while IFS=$'' read var val; do
+    # section found
+    if [[ $var == \[* ]]; then
+      # sectionen die mit '#' beginnen, ignorieren
+      x=`echo "$var"|tr -d "[]"|grep -v '^#'`
+      test "x$x" = "x" && continue
+      i=$((i+1))
+      SECTIONS[$i]="$x"
+    fi
+    if [[ $var == Type=* ]]; then x=`echo "$var"|cut -b 6-`; TYPES[$i]="$x"; fi
+    if [[ $var == Left=* ]]; then x=`echo "$var"|cut -b 6-`; LEFT[$i]="$x"; fi
+    if [[ $var == Top=* ]]; then x=`echo "$var"|cut -b 5-`; TOP[$i]="$x"; fi
+    if [[ $var == Width=* ]]; then x=`echo "$var"|cut -b 7-`; WIDTH[$i]="$x"; fi
+    if [[ $var == Height=* ]]; then x=`echo "$var"|cut -b 8-`; HEIGHT[$i]="$x"; fi
+  done < "$1"
+
+  generate_site
+}
+
+remove_layout() {
+  for i in ${!SECTIONS[@]}; do
+    s="${SECTIONS[$i]}"
+    unset SECTIONS[$i]
+    unset TYPES[$i]
+    unset LEFT[$i]
+    unset TOP[$i]
+    unset WIDTH[$i]
+    unset HEIGHT[$i]
+    rm -rf "$WEB/$s" "$WEB/js/" "$WEB/if_$i."* "$WEB/if_$i" "$WEB/index."* "$CACHE"/*
+    # remove old layout, when no #keep.txt exists
+    # -> disabled, currently not really useful
+    # test -f "$SMB/$s/#keep.txt" || rm -rf "$SMB/$s"
+  done
+}
+
+# $filename + $Section are set
+remove_cached() {
+  Section="${SECTIONS[$i]}"
+  CacheDir="$CACHE/$Section"
+  File=`basename "$filename"`
+  hashstr=`echo "$CacheDir/$File.d/$File"|hashsum 32`
+  # log "Cache flushed: $File, hashstr:$hashstr"
+
+  # remove old cached files
+  rm -rf "$CacheDir/$File"*
+
+  # remove the broken links now:
+  find "$WEB/if_$i/" -type l ! -exec test -e {} \; -exec rm -f {} \;
+  File=""
+}
+
+# file was created @ $SMB
+handle_create() {
+  # log "handle_create file($basefile) dir($directory) orig($fullpath)"
+
+  # check, if current layout has changed
+  if [ "$fullpath" = "$DSB_LAYOUT" ]; then
+    log "Layout Reading: [$DSB_LAYOUT]"
+    cat "$DSB_LAYOUT" | dos2unix | iconv -f latin1 -t utf8 > "$CACHE/$basefile"
+    read_layout "$CACHE/$basefile"
+    rm -f "$CACHE/$basefile"
+  fi
+
+  # check if some section was modified
+  for i in ${!SECTIONS[@]}; do
+    Section="${SECTIONS[$i],,}"
+    if [ "${directory}" = "$Section" ]; then
+      log "File created/changed:  [$directory/$basefile]"
+      generate_site
+    fi
+  done
+}
+
+# file was removed in $SMB
+handle_delete() {
+  # log "handle_delete file($basefile) dir($directory) orig($fullpath)"
+
+  # special file "layout.dsbd"
+  if [ "$fullpath" = "$DSB_LAYOUT" ]; then
+    log "Layout Removed: [$DSB_LAYOUT]"
+    remove_layout
+  fi
+
+  # check if some section was modified
+  for i in ${!SECTIONS[@]}; do
+    Section="${SECTIONS[$i],,}"
+    if [ "${directory}" = "$Section" ]; then
+      log "File deleted: [$directory/$basefile]"
+      remove_cached
+      touch "$DSB_LAYOUT"
+    fi
+  done
+}
+
+# init the whole thing
+startup
+
+# globals arrays for the layout
+declare -A "SECTIONS" "TYPES" "LEFT" "TOP" "WIDTH" "HEIGHT" "STYLES"
+
+# start inotifywait and put in background
+inotifywait --monitor --recursive \
+  --event create,close_write,delete,moved_to,moved_from \
+  --format "|%w%f|%e|" "$SMB" > "$FIFO" 2>&1 &
+INOTIFY_PID=$!
+
+# big loop, which starts things on some events
+waiting="yes"
+while read -u $FIFO_FD -r inotifyline; do
+
+  # the main layout file we are watching
+  for i in "$SMB"/[lL][aA][yY][oO][uU][tT]\.[dD][sS][bB][dD]; do
+    # full path of symlink
+    DSB_LAYOUT_LINK="$i"
+    # full path of current layout
+    DSB_LAYOUT="$SMB"/`readlink $DSB_LAYOUT_LINK`
+  done
+
+  # wait for inotify to be ready
+  if [ "$waiting" = "yes" ]; then
+    test "$inotifyline" = "Watches established." || continue
+    waiting="no"
+
+    # touch layout.dsbd file in smb root, so it get's read
+    log "Layout Init: [$DSB_LAYOUT]"
+    touch "$DSB_LAYOUT"
+    continue
+  fi
+
+  # thats the real input now
+  fullpath=`echo $inotifyline|cut -d'|' -f2`
+  event=`echo $inotifyline|cut -d'|' -f3`
+
+  # remove $SMB prefix
+  # /home/dsb/dsb1/path/file.txt -> path/file.txt
+  filename=${fullpath#$SMB/}
+
+  # we need a name, if there is none, we can't do anything...
+  test "x$filename" = "x" && continue
+
+  # lower case directory and basefile without smb prefix
+  directory=`dirname "${filename,,}"`
+  basefile=`basename "${filename,,}"`
+
+  # .files are ignored
+  [ "${basefile:0:1}" = "." ] && continue
+
+  # ~$lala.doc -> Word Tempfiles
+  [ "${basefile:0:1}" = "~" ] && continue
+
+  # debugging:
+  # log "event($event)"
+  # log "fullpath=($fullpath)  filename($filename)"
+  # log "directory($directory) basefile($basefile)"
+  # continue
+
+  # create / delete
+  case "$event" in
+    "CREATE")
+      handle_create
+    ;;
+    "CLOSE_WRITE,CLOSE")
+      handle_create
+    ;;
+    "MOVED_TO")
+      handle_create
+    ;;
+    "MOVED_FROM")
+      handle_delete
+    ;;
+    "DELETE")
+      handle_delete
+    ;;
+  esac
+done
