@@ -1,7 +1,6 @@
 [Unit]
 Description=Digital Signage Background Daemon
 Documentation=https://github.com/OpenDigitalSignage
-Requires=dsbs-sample.service
 
 [Service]
 Environment=DSB_NAME="%N"

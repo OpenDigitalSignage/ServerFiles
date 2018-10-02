@@ -4,9 +4,18 @@
 # DSBD - Digital Signage Background Daemon
 #
 # ctime: 2015-12-18 /TR
-# mtime: 2018-08-30 /TR
+# mtime: 2018-10-03 /TR
 #
-# -> run it via systemd "dsbd-$name.service"
+# -> run it as systemd service like this:
+# Environment=DSB_NAME="%N"
+# Environment=DSB_USER="dsbd"
+# Environment=DSB_RUNDIR="%t/dsbd"
+# User=dsbd
+# Restart=always
+# RestartSec=10
+# PermissionsStartOnly=true
+# ExecStartPre=/usr/sbin/dsbd
+# ExecStart=/usr/sbin/dsbd
 #############################################
 
 SMB="/home/dsbd/$DSB_NAME"
@@ -22,10 +31,16 @@ DSB_VERSION="DSBD 0.20"
 LIBFILES="/var/lib/dsbd"
 
 # reload delay time (seconds)
-DSB_RELOAD_TIME="5"
+DSB_RELOAD_TIME="10"
 
 # dsbd will recheck for changes @ news feeds (seconds)
-DSB_NEWSFEED_CHECK="300"
+DSB_NEWSFEED_CHECK="30"
+
+# ds-schedule re check time (seconds)
+DSB_SCHEDULE_CHECK="60"
+
+# ds-schedule filename
+DSB_SCHEDULE="$SMB/DS-Schedule.dsbs"
 
 # mutool quality settings for the pdf output
 PDF_QUALITY="-r 110"
@@ -52,12 +67,13 @@ hashsum() {
 # called once in beginning
 startup() {
 
-  # when run as root, init the directories and exit (systemd PreStart)
-  cd /tmp || error "cd /tmp failed!"
+  # ExecStartPre mode:
+  # -> running as root, init the directories and exit
+  cd /tmp
   if [ $EUID == 0 ]; then
-    for d in "$CACHE" `dirname "$LOG"` `dirname "$SMB"` `dirname "$WEB"`; do
+    for d in "$CACHE" `dirname "$LOG"` "$SMB" "$WEB"; do
       mkdir -p "$d"
-      chown -R $DSB_USER "$d" || error "chown -R $DSB_USER $d failed!"
+      chown -R $DSB_USER "$d"
     done
     exit 0
   fi
@@ -93,11 +109,7 @@ startup() {
 <oor:items xmlns:oor="http://openoffice.org/2001/registry" xmlns:xs="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
 <item oor:path="/org.openoffice.Office.Common/Filter/PDF/Export"><prop oor:name="ExportFormFields" oor:op="fuse"><value>false</value></prop></item>
 <item oor:path="/org.openoffice.Office.Common/Filter/PDF/Export"><prop oor:name="IsAddStream" oor:op="fuse"><value>false</value></prop></item>
-<item oor:path="/org.openoffice.Office.Common/Filter/PDF/Export"><prop oor:name="MaxImageResolution" oor:op="fuse"><value>300</value></prop></item>
-<item oor:path="/org.openoffice.Office.Common/Filter/PDF/Export"><prop oor:name="ReduceImageResolution" oor:op="fuse"><value>true</value></prop></item>
-<item oor:path="/org.openoffice.Office.Common/Filter/PDF/Export"><prop oor:name="UseLosslessCompression" oor:op="fuse"><value>false</value></prop></item>
-<item oor:path="/org.openoffice.Office.Common/Filter/PDF/Export"><prop oor:name="SelectPdfVersion" oor:op="fuse"><value>1</value></prop></item>
-<item oor:path="/org.openoffice.Office.Common/Filter/PDF/Export"><prop oor:name="Quality" oor:op="fuse"><value>90</value></prop></item>
+<item oor:path="/org.openoffice.Office.Common/Filter/PDF/Export"><prop oor:name="Quality" oor:op="fuse"><value>96</value></prop></item>
 EOF
 
   # Update Samba Templates (from System Templates)
@@ -105,21 +117,17 @@ EOF
     log "Creating Template Files..."
     mkdir -p "$SMB/Templates"
     rsync -aqu "$LIBFILES/Templates/" "$SMB/Templates/"
+  fi
+
+  if [ ! -f "$SMB/Standard.dsbd" ]; then
     cat <<EOF > "$SMB/Standard.dsbd"
 [Layout]
 Left=400
-Top=314
+Top=300
 Resolution=0
 Type=Background
 EOF
-    cat <<EOF > "$SMB/DS-Schedule.dsbs"
-[Weekplan]
-[Offtimes]
-[Events]
-[Macs]
-EOF
-  unix2dos "$SMB/Standard.dsbd"
-  unix2dos "$SMB/DS-Schedule.dsbs"
+    unix2dos "$SMB/Standard.dsbd"
   fi
 
   cd "$CACHE" || error "Could not change to cachedir $CACHE"
@@ -220,6 +228,7 @@ conv_office() {
   rm -f "$File"
   # pdf nach png:
   FileNoExt=${File%.*}
+  log "conv_mutool -> $File_%03d.png $FileNoExt.pdf"
   mutool draw $PDF_QUALITY -o "$File_%03d.png" "$FileNoExt.pdf"
   rm -f "$FileNoExt.pdf"
   cd "$CACHE"
@@ -291,24 +300,24 @@ read_mediafiles() {
 }
 
 # newsfeeds
-read_newsfeed_recheck() {
+read_newsfeed_bgjob() {
   DSB_FEEDURL=`read_template_file "#Feed.txt"|head -1`
 
   # endless loop
   while :; do
-    log "read_newsfeed_recheck id($Id) @ `date`"
+    # log "read_newsfeed_bgjob id($Id) @ `date`"
 
     # These headers should give us an unique ID:
     # 1) Last-Modified: Sat, 28 Jan 2017 08:18:28 GMT
     # 2) Content-Length: 10474
-    # - when these headers are not present, update every time...
+    # -> when these headers are not present, update every time
     ID_OLD="0"
     test -f "$CacheDir/feed.id" && ID_OLD=`cat "$CacheDir/feed.id"`
     ID_NEW=`curl -s -A "$DSB_VERSION" -I "$DSB_FEEDURL" | grep -E '^(Last-Modified|Content-Length)'|hashsum 32`
     ID_EMPTY=`echo -n|hashsum 32`
     # log "FeedID new=$ID_NEW old=$ID_OLD empty=$ID_EMPTY"
     if [ "$ID_OLD" != "$ID_NEW" -o "$ID_NEW" == "$ID_EMPTY" ]; then
-      log "Updating Feed, url=$DSB_FEEDURL ..."
+      log "Updating Feed ($DSB_FEEDURL) ..."
       curl -s -A "$DSB_VERSION" "$DSB_FEEDURL" > "$CacheDir/feed.xml"
       echo "$ID_NEW" > "$CacheDir/feed.id"
       echo "$ID_NEW" | cut -b1-10 > "$WEB/if_$Id.html.txt"
@@ -320,7 +329,7 @@ read_newsfeed_recheck() {
 
 # Inhalt eines Templates lesen und zurück geben
 read_template_file() {
-  log "read_template_file $1"
+  # log "read_template_file $1"
   find "$UserDir" -iname "$1" | while read f; do
     # \r\n -> \n + utf8 BOM weg machen
     cat "$f" | dos2unix | sed -e 's/\xef\xbb\xbf//g'
@@ -329,14 +338,23 @@ read_template_file() {
 
 # newsfeeds
 read_newsfeed() {
-  log "read_newsfeed id($Id)"
+  # log "read_newsfeed id($Id)"
   mkdir -p "$CacheDir" "$WEB/if_$Id"
 
   # kill old job
-  test -f "$WEB/if_$Id/feed.pid" && kill `cat "$WEB/if_$Id/feed.pid"` 2>/dev/null
+  if [ -f "$WEB/if_$Id/feed.pid" ]; then
+    ts1=`stat -c "%Y" "$WEB/if_$Id/feed.pid"`
+    ts2=`date +%s`
+    tsDiff=$((ts2-ts1))
+    if [ $tsDiff -lt 3 ]; then
+      # log "Ignoriere NewsFeed Restart id($Id) -> tsDiff=$tsDiff"
+      return
+    fi
+    kill `cat "$WEB/if_$Id/feed.pid"` 2>/dev/null
+  fi
 
   # start new job and save id
-  read_newsfeed_recheck &
+  read_newsfeed_bgjob &
   echo $! > "$WEB/if_$Id/feed.pid"
 }
 
@@ -558,7 +576,8 @@ remove_layout() {
     unset TOP[$i]
     unset WIDTH[$i]
     unset HEIGHT[$i]
-    rm -rf "$WEB/$s" "$WEB/js/" "$WEB/if_$i."* "$WEB/if_$i" "$WEB/index."* "$CACHE"/*
+    rm -rf "$WEB/$s" "$WEB/js/" "$WEB/if_$i."* \
+      "$WEB/if_$i" "$WEB/index."* "$CACHE"/*
     # remove old layout, when no #keep.txt exists
     # -> disabled, currently not really useful
     # test -f "$SMB/$s/#keep.txt" || rm -rf "$SMB/$s"
@@ -571,7 +590,7 @@ remove_cached() {
   CacheDir="$CACHE/$Section"
   File=`basename "$filename"`
   hashstr=`echo "$CacheDir/$File.d/$File"|hashsum 32`
-  # log "Cache flushed: $File, hashstr:$hashstr"
+  log "Cache flushed: $File, hashstr:$hashstr"
 
   # remove old cached files
   rm -rf "$CacheDir/$File"*
@@ -588,7 +607,8 @@ handle_create() {
   # check, if current layout has changed
   if [ "$fullpath" = "$DSB_LAYOUT" ]; then
     log "Layout Reading: [$DSB_LAYOUT]"
-    cat "$DSB_LAYOUT" | dos2unix | iconv -f latin1 -t utf8 > "$CACHE/$basefile"
+    cat "$DSB_LAYOUT" | dos2unix \
+    | iconv -f latin1 -t utf8 > "$CACHE/$basefile"
     read_layout "$CACHE/$basefile"
     rm -f "$CACHE/$basefile"
   fi
@@ -624,11 +644,256 @@ handle_delete() {
   done
 }
 
+wakeup_screens_etherwake() {
+  NETDEVS=`cat /proc/net/dev | grep "eth"| cut -d: -f1`
+  for i in ${!MACS[@]}; do
+    str=${MACS[$i]}
+    str=${str#*|}
+    mac=${str:0:17}
+    for dev in ${NETDEVS[@]}; do
+      $ETHERWAKE -i "$dev" "$mac"
+      $ETHERWAKE -i "$dev" "$mac"
+    done
+  done
+}
+
+wakeup_screens_wakeonlan() {
+  # wakeonlan [-h] [-v] [-i IP_address] [-p port] [-f file] [[hardware_address] ...]
+  for i in ${!MACS[@]}; do
+    # 3=1|12:34:56:78:90:ef|DSB Lehrerzimmer
+    str=${MACS[$i]}
+    str=${str#*|}
+    mac=${str:0:17}
+    wakeonlan $mac
+    wakeonlan $mac
+  done
+}
+
+wakeup_screens_wol() {
+  for i in ${!MACS[@]}; do
+    # 3=1|12:34:56:78:90:ef|DSB Lehrerzimmer
+    str=${MACS[$i]}
+    str=${str#*|}
+    mac=${str:0:17}
+    wol $mac
+    wol $mac
+  done
+}
+
+# ON|MAC|Beschreibung
+# [Macs]
+wakeup_screens() {
+  export PATH="/sbin:/bin:/usr/sbin:/usr/bin"
+
+  # check layout link
+  old_layout=`readlink "$SMB/Layout.dsbd"`
+  if [ "x$cl_layout.dsbd" != "x$old_layout" ]; then
+    rm -f "$SMB/Layout.dsbd"
+    ln -s "$cl_layout.dsbd" "$SMB/Layout.dsbd"
+  fi
+
+  # wol via wakeonlan tool (ubuntu)
+  WOL=`which wakeonlan`
+  if [ ! -z $WOL ]; then
+    wakeup_screens_wakeonlan
+    return
+  fi
+
+  # wol via wol tool (arch linux)
+  WOL=`which wol`
+  if [ ! -z $WOL ]; then
+    wakeup_screens_wol
+    return
+  fi
+
+  # wol via ether-wake (centos)
+  WOL=`which ether-wake`
+  if [ ! -z $WOL ]; then
+    wakeup_screens_etherwake
+    return
+  fi
+
+  log "WARNING: can not find wakeonlan tool like: wol, wakeonlan, ether-wake ?!"
+}
+
+# ON|YYYYmmdd|HHMM-HHMM|Layout|Beschreibung
+function set_event() {
+  cat <<EOF > "$WEB/status.txt"
+SHUTDOWN=0
+NOTE=$cl_note
+LAYOUT=$cl_layout
+TIME=$cl_time
+DATE=$cl_date
+EOF
+  wakeup_screens
+}
+
+function set_offtime() {
+  cat <<EOF > "$WEB/status.txt"
+SHUTDOWN=1
+NOTE=$cl_note
+DATE1=$cl_date1
+DATE2=$cl_date2
+EOF
+}
+
+function set_weekplan() {
+  cat <<EOF > "$WEB/status.txt"
+SHUTDOWN=0
+NOTE=weekplan
+LAYOUT=$cl_layout
+TIME=$cl_time
+DOW=$cl_dow
+EOF
+  wakeup_screens
+}
+
+# parse schedule file -> create $WEB/status.txt
+check_schedule() {
+  local i
+  local INI="$CACHE/Schedule$$"
+
+  if [ ! -f "$DSB_SCHEDULE" ]; then
+    cat <<EOF > "$DSB_SCHEDULE"
+[Weekplan]
+[Offtimes]
+[Events]
+[Macs]
+EOF
+    unix2dos "$DSB_SCHEDULE"
+  fi
+
+  # arrays @ layout.ini
+  unset WEEKPLAN
+  unset OFFTIMES
+  unset EVENTS
+  unset MACS
+  declare -A "SECTIONS" "TYPES" "LEFT" "TOP" "WIDTH" "HEIGHT" "STYLES"
+
+  cat "$DSB_SCHEDULE" | dos2unix | iconv -f Latin1 -t utf8 > "$INI"
+  while IFS=$'' read var; do
+    # section found
+    if [[ $var == \[*\] ]]; then
+      section=$var
+      i=0
+      continue
+    fi
+    # check for valid entry
+    case $var in
+    [0-9]*=1*)
+      case $section in
+      "[Weekplan]")
+        WEEKPLAN[$i]=${var#*|}
+        i=$((i+1))
+        ;;
+      "[Offtimes]")
+        OFFTIMES[$i]=${var#*|}
+        i=$((i+1))
+        ;;
+      "[Events]")
+        EVENTS[$i]=${var#*|}
+        i=$((i+1))
+        ;;
+      "[Macs]")
+        MACS[$i]=$var
+        i=$((i+1))
+        ;;
+      esac
+      # echo "var=$var, sektion=$section, i=$i"
+      ;;
+    esac
+  done < "$INI"
+  rm -f "$INI"
+
+  # read current date, time and day of week
+  DATETIME=`date +%u%Y%m%d%H%M`
+  DOW=${DATETIME:0:1}
+  TODAY=${DATETIME:1:8}
+  CTIME=${DATETIME:9:4}
+
+  ######################################################################
+  # 1) check events
+  for x in ${!EVENTS[@]}; do
+    # 20170130|1100-1200|Layout2|Admin Day
+    str=${EVENTS[$x]}
+    cl_date=${str:0:8}
+    if [ "x$cl_date" = "x$TODAY" ]; then
+      str=${str#*|}
+      cl_time=${str:0:9}
+      cl_time1=${str:0:4}
+      cl_time2=${str:5:4}
+      if [ $CTIME -ge $cl_time1 -a $CTIME -le $cl_time2 ]; then
+        str=${str#*|}
+        cl_layout=${str%|*}
+        cl_note=${str#*|}
+        set_event
+        return
+      fi
+    fi
+  done
+
+  ######################################################################
+  # 2) check offtimes
+  for x in ${!OFFTIMES[@]}; do
+    # YYYYmmdd-YYYYmmdd|Beschreibung
+    str=${OFFTIMES[$x]}
+    cl_date1=${str:0:8}
+    cl_date2=${str:9:8}
+    if [ $TODAY -ge $cl_date1 -a $TODAY -le $cl_date2 ]; then
+      cl_note=${str#*|}
+      set_offtime
+      return
+    fi
+  done
+
+  ######################################################################
+  # 3) check weekplan
+  for x in ${!WEEKPLAN[@]}; do
+    # 5|0730-1230|Layout1
+    str=${WEEKPLAN[$x]}
+    cl_dow=${str:0:1}
+    if [ "x$cl_dow" = "x$DOW" ]; then
+      str=${str#*|}
+      cl_time=${str:0:9}
+      cl_time1=${str:0:4}
+      cl_time2=${str:5:4}
+      if [ $CTIME -ge $cl_time1 -a $CTIME -le $cl_time2 ]; then
+        cl_layout=${str#*|}
+        set_weekplan
+        return
+      fi
+    fi
+  done
+
+  ######################################################################
+  # 4) default, shutdown the screen - when nothing else is todo
+  cl_note="nothing scheduled, shutdown"
+  cl_date1=$TODAY
+  cl_date2=$TODAY
+  set_offtime
+}
+
+# re-check every minute for updating the status.txt
+check_schedule_bgjob() {
+  while :; do
+    # log "check_schedule_bgjob() @ `date`"
+    check_schedule
+    sleep $DSB_SCHEDULE_CHECK
+  done
+}
+
+######################################################################
+# MAIN
+######################################################################
+
+# arrays @ schedule ini
+declare -A "WEEKPLAN" "OFFTIMES" "EVENTS" "MACS"
+
 # init the whole thing
 startup
 
-# globals arrays for the layout
-declare -A "SECTIONS" "TYPES" "LEFT" "TOP" "WIDTH" "HEIGHT" "STYLES"
+# start schedule background job
+check_schedule_bgjob &
 
 # start inotifywait and put in background
 inotifywait --monitor --recursive \
