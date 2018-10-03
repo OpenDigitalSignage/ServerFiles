@@ -70,7 +70,7 @@ cp -r dsbd /var/lib/dsbd
 cd $SRC/distrib/Ubuntu-18.04-LTS || exit
 
 # copy dsbd script to /usr/sbin
-cp sbin/dsbd /sbin
+cp sbin/dsbd /usr/sbin
 
 # create service example
 mkdir -p /etc/dsbd.d
