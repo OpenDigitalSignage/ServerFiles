@@ -17,15 +17,15 @@ add-apt-repository universe
 apt update -y
 apt upgrade -y
 
-# install ssmtp as mail provider, so we don't get the postfix mess
-apt install -y ssmtp
+# install ssmtp as mail provider, so we don't get the postfix + mysql
+apt install -y ssmtp bsd-mailx
 
 # install needed packages:
 apt install -y inotify-tools samba imagemagick libreoffice-common \
- unoconv mupdf-tools micro-httpd dos2unix htop
+ unoconv mupdf-tools micro-httpd dos2unix htop mc bash-completion
 
-# these are not really needed, but I like want these:
-apt install -y pacapt mc bash-completion smartmontools sshfs
+# these are not really needed, but I like to have them ;)
+apt install -y pacapt smartmontools sshfs
 
 # configure samba
 cat << EOF > /etc/samba/smb.conf
