@@ -22,7 +22,7 @@ apt install -y ssmtp bsd-mailx
 
 # install needed packages:
 apt install -y inotify-tools samba imagemagick libreoffice-common \
- unoconv mupdf-tools micro-httpd dos2unix htop mc bash-completion
+ unoconv mupdf-tools mini-httpd dos2unix htop mc bash-completion
 
 # these are not really needed, but I like to have them ;)
 apt install -y pacapt smartmontools sshfs
