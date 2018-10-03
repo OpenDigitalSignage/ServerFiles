@@ -22,7 +22,7 @@ apt install -y ssmtp
 
 # install needed packages:
 apt install -y inotify-tools samba imagemagick libreoffice-common \
- unoconv mupdf-toolsmicro-httpd dos2unix htop
+ unoconv mupdf-tools micro-httpd dos2unix htop
 
 # these are not really needed, but I like want these:
 apt install -y pacapt mc bash-completion smartmontools sshfs
