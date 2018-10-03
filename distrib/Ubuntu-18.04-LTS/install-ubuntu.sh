@@ -6,9 +6,8 @@
 ##################################################
 
 ##################################################
-# /TR 2018-09-30
+# /TR 2018-10-03
 ##################################################
-SERVERNAME="ds-server"
 
 mkdir -p /root/tmp
 cd /root/tmp || exit
@@ -35,7 +34,7 @@ cat << EOF > /etc/samba/smb.conf
 # /TR 2018-09-30
 [global]
     workgroup = WORKGROUP
-    server string = $SERVERNAME
+    server string = ds-server
     log file = /var/log/samba/log.%m
     max log size = 50
     client signing = required
@@ -68,12 +67,12 @@ sed -i /etc/mini-httpd.conf \
 # - now you have to add the init scripts you want to /etc/rc.d/init.d
 # - source: https://github.com/OpenDigitalSignage/ServerFiles/distrib/Ubuntu-18.04-LTS
 #
-# 1) cp $url/etc-dsb.d/dsb-reload /etc/dsb.d/dsb-reload
-# 1) cp $url/etc-dsb.d/dsbs-sample.service /etc/dsb.d/dsbs-sample.service
-# 1) cp $url/etc-dsb.d/dsbs-sample.service /etc/dsb.d/dsbs-sample.service
-# 2) cp $url/sbin/dsbd /usr/sbin/dsbd
-# 3) cp $url/sbin/dsbs /usr/sbin/dsbs
-# 4) add systemd files to /etc/dsb.d
-# 5) check the dsbd-sample.service and the dsbs-sample.service
-# 6) create services like them and put symbolic links to /etc/systemd/system
+# 1) mkdir /etc/dsb.d
+# 2) cp $url/etc-dsb.d/dsb-reload /etc/dsb.d/dsb-reload
+# 3) cp $url/sbin/dsbd /usr/sbin/dsbd
+# 4) check the dsbd-sample.service and cp it to /etc/dsb.d
+# 5) systemctl link /etc/dsbd.d/dsbd-sample.service
+# 6) systemctl enable dsbd-sample
+# 7) systemctl restart dsbd-sample
+# 8) repeat step 5-8 for each different group of TV's
 #############################################################################

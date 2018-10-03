@@ -18,6 +18,7 @@
 # ExecStart=/usr/sbin/dsbd
 #############################################
 
+# these settings are okay for most systems:
 SMB="/home/dsbd/$DSB_NAME"
 WEB="/var/www/html/dsbd/$DSB_NAME"
 LOG="/var/log/dsbd/$DSB_NAME.log"
@@ -25,7 +26,7 @@ CACHE="$DSB_RUNDIR/$DSB_NAME.d"
 FIFO="$CACHE/$DSB_NAME.fifo"
 
 # version information
-DSB_VERSION="DSBD 0.20"
+DSB_VERSION="DSBD 0.21"
 
 # javascript files and templates
 LIBFILES="/var/lib/dsbd"
@@ -34,7 +35,7 @@ LIBFILES="/var/lib/dsbd"
 DSB_RELOAD_TIME="10"
 
 # dsbd will recheck for changes @ news feeds (seconds)
-DSB_NEWSFEED_CHECK="30"
+DSB_NEWSFEED_CHECK="240"
 
 # ds-schedule re check time (seconds)
 DSB_SCHEDULE_CHECK="60"
@@ -341,7 +342,7 @@ read_newsfeed() {
   # log "read_newsfeed id($Id)"
   mkdir -p "$CacheDir" "$WEB/if_$Id"
 
-  # kill old job
+  # kill old job, when not just started within last 3 seconds
   if [ -f "$WEB/if_$Id/feed.pid" ]; then
     ts1=`stat -c "%Y" "$WEB/if_$Id/feed.pid"`
     ts2=`date +%s`
@@ -358,13 +359,13 @@ read_newsfeed() {
   echo $! > "$WEB/if_$Id/feed.pid"
 }
 
-# -> setzt diese Variable: $LAYOUT
+# setup $LAYOUT variable
 read_template_files() {
   LAYOUT=`read_template_file "#Layout.txt"`
   FILES=`echo "$LAYOUT" | grep -E '%\w*%' | grep -vE '(DSB_|IFRAME_)' | cut -d% -f2`
 
   # work with the "Templates"
-  # alle %xyz% platzhalter ersetzen
+  # -> replace all %xyz% templates
   for x in $FILES; do
     # Ticker und Mediafiles sind anders!
     Content=`read_template_file "#$x.txt"`
@@ -771,6 +772,8 @@ EOF
   declare -A "SECTIONS" "TYPES" "LEFT" "TOP" "WIDTH" "HEIGHT" "STYLES"
 
   cat "$DSB_SCHEDULE" | dos2unix | iconv -f Latin1 -t utf8 > "$INI"
+  # we parse the file every minute, this could be made better, but this will be
+  # more complex, i love the KISS principle ;)  /TR
   while IFS=$'' read var; do
     # section found
     if [[ $var == \[*\] ]]; then
