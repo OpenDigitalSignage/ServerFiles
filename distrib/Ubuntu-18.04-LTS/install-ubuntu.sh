@@ -9,10 +9,6 @@
 # /TR 2018-10-03
 ##################################################
 
-mkdir -p /root/tmp
-cd /root/tmp || exit
-git clone --depth=1 https://github.com/OpenDigitalSignage/ServerFiles
-
 add-apt-repository universe
 apt update -y
 apt upgrade -y
@@ -49,10 +45,11 @@ cat << EOF > /etc/samba/smb.conf
     path = /home/dsbd/dsbd-sample
     read only = No
 
-[dsbd-sample2]
-    comment = DSBD
-    path = /home/dsbd/dsbd-sample2
-    read only = No
+# you may use multiple instances (groups of displays)
+# [dsbd-sample2]
+#     comment = DSBD
+#     path = /home/dsbd/dsbd-sample2
+#     read only = No
 EOF
 
 # configure mini-httpd
@@ -60,19 +57,30 @@ sed -i /etc/mini-httpd.conf \
  -e 's/^host=.*/host=0.0.0.0/g' \
  -e 's/^charset=.*/charset=utf8/g'
 
-# last thing, add an smb user:
-# smbpasswd -a dsbd
+mkdir -p /root/tmp
+cd /root/tmp || exit
+git clone --depth=1 https://github.com/OpenDigitalSignage/ServerFiles
+SRC="/root/tmp/ServerFiles"
 
-#############################################################################
-# - now you have to add the init scripts you want to /etc/rc.d/init.d
-# - source: https://github.com/OpenDigitalSignage/ServerFiles/distrib/Ubuntu-18.04-LTS
-#
-# 1) mkdir /etc/dsb.d
-# 2) cp $url/etc-dsb.d/dsb-reload /etc/dsb.d/dsb-reload
-# 3) cp $url/sbin/dsbd /usr/sbin/dsbd
-# 4) check the dsbd-sample.service and cp it to /etc/dsb.d
-# 5) systemctl link /etc/dsbd.d/dsbd-sample.service
-# 6) systemctl enable dsbd-sample
-# 7) systemctl restart dsbd-sample
-# 8) repeat step 5-8 for each different group of TV's
-#############################################################################
+# copy template files
+cd $SRC/var/lib || exit
+cp -r dsbd /var/lib/dsbd
+
+# copy dsbd script and one service example file
+cd $SRC/distrib/Ubuntu-18.04-LTS || exit
+
+# copy dsbd script to /usr/sbin
+cp sbin/dsbd /sbin
+
+# create service example
+mkdir -p /etc/dsbd.d
+cp etc-dsbd.d/dsbd-reload /etc/dsbd.d
+cp etc-dsbd.d/dsbd-sample.service /etc/dsbd.d
+
+# create as much services as you have TV groups
+systemctl link /etc/dsbd.d/dsbd-sample.service
+systemctl enable dsbd-sample
+systemctl restart dsbd-sample
+
+# last thing, add smb user with some password
+# smbpasswd -a dsbd
