@@ -26,7 +26,7 @@ apt install -y pacapt smartmontools sshfs
 # configure samba
 cat << EOF > /etc/samba/smb.conf
 
-# edit to fit your wanted IP's
+# edit to fit your wanted IP's and settings
 # /TR 2018-09-30
 [global]
     workgroup = WORKGROUP
@@ -56,6 +56,8 @@ EOF
 sed -i /etc/mini-httpd.conf \
  -e 's/^host=.*/host=0.0.0.0/g' \
  -e 's/^charset=.*/charset=utf8/g'
+sed -i /etc/default/mini-httpd \
+ -e 's/^START=0/START=1/g' \
 
 mkdir -p /root/tmp
 cd /root/tmp || exit
@@ -81,6 +83,13 @@ cp etc-dsbd.d/dsbd-sample.service /etc/dsbd.d
 systemctl link /etc/dsbd.d/dsbd-sample.service
 systemctl enable dsbd-sample
 systemctl restart dsbd-sample
+
+systemctl enable httpd
+systemctl enable smbd
+systemctl enable nmbd
+systemctl restart httpd
+systemctl restart smbd
+systemctl restart nmbd
 
 # last thing, add smb user with some password
 # smbpasswd -a dsbd
