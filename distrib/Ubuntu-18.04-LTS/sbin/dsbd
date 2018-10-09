@@ -22,7 +22,7 @@
 SMB="/home/dsbd/$DSB_NAME"
 WEB="/var/www/html/dsbd/$DSB_NAME"
 LOG="/var/log/dsbd/$DSB_NAME.log"
-CACHE="$DSB_RUNDIR/$DSB_NAME.d"
+CACHE="$DSB_CACHE/$DSB_NAME.d"
 FIFO="$CACHE/$DSB_NAME.fifo"
 
 # version information
