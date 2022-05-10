@@ -5,15 +5,7 @@ html,body {
 
 #wetter {
   position: fixed;
-  width: 180px;
-  height: 354px;
+  width: 300px;
+  height: 250px;
   overflow: hidden;
-}
-
-#button1, #button2 {
-  height: 106px;
-}
-
-#button3 {
-  height: 148px;
 }

@@ -1,5 +1,5 @@
 [Unit]
-Description=Digital Signage Background Daemon (dsbd-sample)
+Description=Digital Signage Background Daemon (%N)
 Documentation=https://github.com/OpenDigitalSignage
 
 [Service]

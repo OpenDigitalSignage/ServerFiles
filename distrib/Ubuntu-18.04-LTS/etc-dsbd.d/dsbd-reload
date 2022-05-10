@@ -1,8 +1,0 @@
-#!/bin/bash
-
-systemctl daemon-reload
-systemctl restart dsbd-sample
-
-#systemctl restart dsbd-flur
-#systemctl restart dsbd-sample2
-#systemctl restart dsbd-sampleN

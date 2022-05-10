@@ -7,39 +7,11 @@ html,body,iframe {
   overflow: hidden;
 }
 
-#wetterW125 {
-  width: 125px;
-  height: 113px; /* 113 / 140 */
-  border: 0px solid;
-  border-radius: 8px;
-}
-
-#wetterW220 {
-  width: 220px;
-  height: 250px; /* 250 / 270 */
-  border: 0px solid;
-  border-radius: 8px;
-}
 
 #wetterW300 {
   width: 300px;
-  height: 250px; /* 250 / 270 */
+  height: 340px;
   border: 0px solid;
   border-radius: 8px;
 }
 
-#wetterW468 {
-  width: 468px;
-  height: 117px; /* 117 / 140 */
-  border: 1px solid;
-  border-radius: 8px;
-  box-shadow: 5px 5px 5px #111111;
-}
-
-#wetterW600 {
-  width: 600px;
-  height: 117px; /* 117 / 140 */
-  border: 1px solid;
-  border-radius: 8px;
-  box-shadow: 5px 5px 5px #111111;
-}

@@ -4,16 +4,10 @@
 Files for the Server of your Digital Signage System
 
 
-## Centos 6.x
+## Supported systems
 
-- until dsbd 0.19 I installed DSBD only on CentOS 6.x systems
-- the files of this version are kept in "distrib/CentOS-6.x"
-
-## Ubuntu LTS 18.04
-
-- new systems are using systemd services
-- the files of this version are kept in "distrib/Ubuntu-18.04-LTS"
-
+- Debian 10 / 11 / 12
+- Ubuntu LTS 20.04 / 22.04
 
 ## German Intruduction to the DSBD System with CentOS 6.x (2017)
 

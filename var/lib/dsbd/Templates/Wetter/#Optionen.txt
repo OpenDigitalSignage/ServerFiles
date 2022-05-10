@@ -4,14 +4,10 @@ Wetter als iframe /TR
 
 -->
 
-<!--
-<iframe id="wetterW125" src="http://www.wetter-deutschland.com/brandenburg/elsterwerda/widget/w125/color-hellblau" frameborder="0" scrolling="no"></iframe>
-<iframe id="wetterW220" src="http://www.wetter-deutschland.com/brandenburg/elsterwerda/widget/w220/color-hellblau" frameborder="0" scrolling="no"></iframe>
-<iframe id="wetterW300" src="http://www.wetter-deutschland.com/brandenburg/elsterwerda/widget/w300/color-hellblau" frameborder="0" scrolling="no"></iframe>
-<iframe id="wetterW468" src="http://www.wetter-deutschland.com/brandenburg/elsterwerda/widget/w468/color-weiss" frameborder="0" scrolling="no"></iframe>
--->
-<iframe id="wetterW600" src="http://www.wetter-deutschland.com/brandenburg/elsterwerda/widget/w600/color-hellblau" frameborder="0" scrolling="no"></iframe>
+<iframe id="wetterW300" width='300' height='365' name='FC3' style='border:1px
+solid;border-radius:10px;border-color:transparent;'
+src='https://api.wetteronline.de/wetterwidget?gid=x0514&modeid=FC3&seourl=elsterwerda&locationname=Elsterwerda&lang=de'></iframe>
 
 <script type="text/javascript">
-  dsb_scaler("wetterW600", 98);
+  dsb_scaler("wetterW300", 98);
 </script>
