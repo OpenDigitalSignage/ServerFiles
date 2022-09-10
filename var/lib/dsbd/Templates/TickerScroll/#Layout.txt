@@ -14,7 +14,6 @@
   <div id="ticker" class="marquee">%DSB_TICKER_SCROLLING%</div>
   <script type="text/javascript">
   %OPTIONEN%
-  %DSB_RELOAD%
   </script>
 </body>
 

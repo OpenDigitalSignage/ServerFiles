@@ -4,7 +4,7 @@
 # DSBD - Digital Signage Background Daemon
 #
 # ctime: 2015-12-18 /TR
-# mtime: 2022-05-10 /TR
+# mtime: 2022-09-12 /TR
 #############################################
 
 # these settings are okay for most systems:
@@ -15,7 +15,7 @@ CACHE="$DSB_CACHE/$DSB_NAME.d"
 FIFO="$CACHE/$DSB_NAME.fifo"
 
 # version information
-DSB_VERSION="DSBD 0.22"
+DSB_VERSION="DSBD 0.23"
 
 # javascript files and templates
 LIBFILES="/var/lib/dsbd"
@@ -34,6 +34,9 @@ DSB_SCHEDULE="$SMB/DS-Schedule.dsbs"
 
 # mutool quality settings for the pdf output
 PDF_QUALITY="-r 110"
+
+# default rsync options
+RSYNC_OPTS="-a -q --ignore-existing"
 
 # log sth.
 log() {
@@ -84,7 +87,7 @@ startup() {
   test -x /usr/bin/md5sum || error "Need md5sum!"
   test -x /usr/bin/mutool || error "Need mutool!"
   test -x /usr/bin/convert || error "Need convert!"
-  test -x /usr/bin/unoconv || error "Need unoconv / libreoffice!"
+  test -x /usr/bin/unoconv || error "Need unoconv (libreoffice)!"
   test -x /usr/bin/dos2unix || error "Need dos2unix!"
 
   # register cleanup function
@@ -99,14 +102,16 @@ startup() {
 <oor:items xmlns:oor="http://openoffice.org/2001/registry" xmlns:xs="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
 <item oor:path="/org.openoffice.Office.Common/Filter/PDF/Export"><prop oor:name="ExportFormFields" oor:op="fuse"><value>false</value></prop></item>
 <item oor:path="/org.openoffice.Office.Common/Filter/PDF/Export"><prop oor:name="IsAddStream" oor:op="fuse"><value>false</value></prop></item>
-<item oor:path="/org.openoffice.Office.Common/Filter/PDF/Export"><prop oor:name="Quality" oor:op="fuse"><value>96</value></prop></item>
+<item oor:path="/org.openoffice.Office.Common/Filter/PDF/Export"><prop oor:name="ReduceImageResolution" oor:op="fuse"><value>false</value></prop></item>
+<item oor:path="/org.openoffice.Office.Common/Filter/PDF/Export"><prop oor:name="UseLosslessCompression" oor:op="fuse"><value>true</value></prop></item>
+<item oor:path="/org.openoffice.Office.Common/Filter/PDF/Export"><prop oor:name="Quality" oor:op="fuse"><value>100</value></prop></item>
 EOF
 
   # Update Samba Templates (from System Templates)
   if [ ! -d "$SMB/Templates" ]; then
     log "Creating Template Files..."
     mkdir -p "$SMB/Templates"
-    rsync -aqu "$LIBFILES/Templates/" "$SMB/Templates/"
+    rsync $RSYNC_OPTS "$LIBFILES/Templates/" "$SMB/Templates/"
   fi
 
   if [ ! -f "$SMB/Standard.dsbd" ]; then
@@ -141,7 +146,6 @@ clean_fifo() {
   done
   if [ "$counter" != "0" ]; then
     log "Ignored Inotify's: $counter"
-    # reload site, so no update gets lost
     touch "$DSB_LAYOUT"
   fi
 }
@@ -310,7 +314,6 @@ read_newsfeed_bgjob() {
       log "Updating Feed ($DSB_FEEDURL) ..."
       curl -s -A "$DSB_VERSION" "$DSB_FEEDURL" > "$CacheDir/feed.xml"
       echo "$ID_NEW" > "$CacheDir/feed.id"
-      echo "$ID_NEW" | cut -b1-10 > "$WEB/if_$Id.html.txt"
       ln -s -f "$CacheDir/feed.xml" "$WEB/if_$Id/feed.xml"
     fi
     sleep $DSB_NEWSFEED_CHECK
@@ -361,8 +364,7 @@ read_template_files() {
     LAYOUT=${LAYOUT/"%$x%"/"$Content"}
   done
 
-  # reload kann überall drinnen sein
-  RELOAD="dsb_checkreload(\"if_$Id.html.txt\", $DSB_RELOAD_TIME); <!-- Update @ `date` -->"
+  RELOAD="dsb_checkreload(\"update.txt\", $DSB_RELOAD_TIME); <!-- Update @ `date` -->"
   LAYOUT=${LAYOUT/'%DSB_RELOAD%'/"$RELOAD"}
 }
 
@@ -411,7 +413,7 @@ generate_index() {
   log "Creating Index($Id), Type=$Type, Section=$Section"
 
   # Update User Template from Samba Template
-  rsync -aqu "$SMB/Templates/$Type/" "$UserDir/"
+  rsync $RSYNC_OPTS "$SMB/Templates/$Type/" "$UserDir/"
   read_template_files
 
   # style der iframes
@@ -424,9 +426,8 @@ generate_index() {
   LAYOUT=${LAYOUT/'%DSB_MEDIA%'/"$MEDIAFILES"}
 
   # generate frameset and hashsum of it
-  echo "$LAYOUT" > "$WEB/if_$Id.html"
-  cat "$WEB/if_$Id.html" | hashsum 10 > "$WEB/if_$Id.html.txt"
-  ln -s -f "if_$Id.html" "$WEB/index.html"
+  rm -f "$WEB/index.html"
+  echo "$LAYOUT" > "$WEB/index.html"
 }
 
 # einen IFrame erzeugen
@@ -435,7 +436,7 @@ generate_iframe() {
   CacheDir="$CACHE/$Section"
 
   # Update User Template from Samba Template
-  rsync -aqu "$SMB/Templates/$Type/" "$UserDir/"
+  rsync $RSYNC_OPTS "$SMB/Templates/$Type/" "$UserDir/"
 
   log "Creating Frame($Id), Type=$Type, Section=$Section"
   case "$Type" in
@@ -475,9 +476,8 @@ generate_iframe() {
       ;;
   esac
 
-  # generate iframe and hashsum of it
+  # generate iframe
   echo "$LAYOUT" > "$WEB/if_$Id.html"
-  cat "$WEB/if_$Id.html" | hashsum 10 > "$WEB/if_$Id.html.txt"
 
   # obsolete style: Rahmen -> Border
   STYLES[$Id]=`read_template_file "#Border.txt";read_template_file "#Rahmen.txt"`
@@ -500,13 +500,13 @@ generate_site() {
   echo -n > "$CACHE/iframe-links"
 
   # 1a) Update directories
-  rsync -qau "$LIBFILES/js/" "$WEB/js/"
+  rsync $RSYNC_OPTS "$LIBFILES/js/" "$WEB/js/"
 
   # 1b) Update Samba Templates (from System Templates)
   if [ ! -d "$SMB/Templates" ]; then
     log "Syncing Template Files..."
     mkdir -p "$SMB/Templates"
-    rsync -aqu "$LIBFILES/Templates/" "$SMB/Templates/"
+    rsync $RSYNC_OPTS "$LIBFILES/Templates/" "$SMB/Templates/"
   fi
 
   # 2) reset FIFO Queue
@@ -530,8 +530,10 @@ generate_site() {
     generate_index
   done
 
-  # 4) cleanup
+  # 5) cleanup
   rm -f "$CACHE/"iframe-*
+  cat "$WEB/"*.html | hashsum 20 > "$WEB/update.txt"
+  date >> "$WEB/update.txt"
 }
 
 # read layout file and set up the arrays:
@@ -568,9 +570,6 @@ remove_layout() {
     unset HEIGHT[$i]
     rm -rf "$WEB/$s" "$WEB/js/" "$WEB/if_$i."* \
       "$WEB/if_$i" "$WEB/index."* "$CACHE"/*
-    # remove old layout, when no #keep.txt exists
-    # -> disabled, currently not really useful
-    # test -f "$SMB/$s/#keep.txt" || rm -rf "$SMB/$s"
   done
 }
 
@@ -641,8 +640,8 @@ wakeup_screens_etherwake() {
     str=${str#*|}
     mac=${str:0:17}
     for dev in ${NETDEVS[@]}; do
-      $ETHERWAKE -i "$dev" "$mac"
-      $ETHERWAKE -i "$dev" "$mac"
+      $ETHERWAKE -i "$dev" "$mac" >/dev/null
+      $ETHERWAKE -i "$dev" "$mac" >/dev/null
     done
   done
 }
@@ -654,8 +653,8 @@ wakeup_screens_wakeonlan() {
     str=${MACS[$i]}
     str=${str#*|}
     mac=${str:0:17}
-    wakeonlan $mac
-    wakeonlan $mac
+    wakeonlan $mac >/dev/null
+    wakeonlan $mac >/dev/null
   done
 }
 
@@ -665,8 +664,8 @@ wakeup_screens_wol() {
     str=${MACS[$i]}
     str=${str#*|}
     mac=${str:0:17}
-    wol $mac
-    wol $mac
+    wol $mac >/dev/null
+    wol $mac >/dev/null
   done
 }
 
@@ -761,8 +760,7 @@ EOF
   declare -A "SECTIONS" "TYPES" "LEFT" "TOP" "WIDTH" "HEIGHT" "STYLES"
 
   cat "$DSB_SCHEDULE" | dos2unix | iconv -f Latin1 -t utf8 > "$INI"
-  # we parse the file every minute, this could be made better, but this will be
-  # more complex, i love the KISS principle ;)  /TR
+  # we parse the file every minute, KISS
   while IFS=$'' read var; do
     # section found
     if [[ $var == \[*\] ]]; then

@@ -12,10 +12,6 @@
 
 <body>
  %OPTIONEN%
-
- <script type="text/javascript">
- %DSB_RELOAD%
- </script>
 </body>
 
 </html>

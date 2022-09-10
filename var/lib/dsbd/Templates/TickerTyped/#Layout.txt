@@ -15,7 +15,6 @@
   <span id="ticker"></span>
   <script type="text/javascript">
   %OPTIONEN%
-  %DSB_RELOAD%
   </script>
 </body>
 

@@ -18,7 +18,6 @@
 
 <script type="text/javascript">
 dsb_scaler("wetter", 100);
-%DSB_RELOAD%
 </script>
 
 </body>
