@@ -15,7 +15,7 @@ CACHE="$DSB_CACHE/$DSB_NAME.d"
 FIFO="$CACHE/$DSB_NAME.fifo"
 
 # version information
-DSB_VERSION="DSBD 0.23a"
+DSB_VERSION="DSBD 0.24"
 
 # javascript files and templates
 LIBFILES="/var/lib/dsbd"
@@ -55,6 +55,10 @@ hashsum() {
   HASHLEN=32
   test -z $1 || HASHLEN=$1
   cat | md5sum | cut -b1-$HASHLEN
+}
+
+random32() {
+  (cat; date "+%s-%N") | md5sum | cut -b1-32
 }
 
 # called once in beginning
@@ -154,7 +158,7 @@ clean_fifo() {
 generate_img_list() {
   echo -n > "$CacheDir/$File.img"
   find "$CacheDir/$File.d" -name "*.png" | sort | while read f; do
-    hashstr=`echo $f|hashsum 32`
+    hashstr=`echo $f|random32`
     ln -s -f "$f" "$WEB/if_$Id/$hashstr.png"
     echo "<img id=\"$hashstr\" src=\"if_$Id/$hashstr.png\" alt=\"\">" >> "$CacheDir/$File.img"
   done
@@ -169,7 +173,7 @@ conv_direct() {
   # <img> liste machen
   echo -n > "$CacheDir/$File.img"
   find "$CacheDir/$File.d" -iname "*.$lcExt" | sort | while read f; do
-    hashstr=`echo $f|hashsum 32`
+    hashstr=`echo $f|random32`
     ln -s -f "$f" "$WEB/if_$Id/$hashstr.$lcExt"
     echo "<img id=\"$hashstr\" src=\"if_$Id/$hashstr.$lcExt\" alt=\"\">" >> "$CacheDir/$File.img"
   done
@@ -184,7 +188,7 @@ conv_video() {
   # <video> liste machen
   echo -n > "$CacheDir/$File.video"
   find "$CacheDir/$File.d" -iname "*.$lcExt" | sort | while read f; do
-    hashstr=`echo $f|hashsum 32`
+    hashstr=`echo $f|random32`
     ln -s -f "$f" "$WEB/if_$Id/$hashstr.$lcExt"
     echo "<video id=\"$hashstr\" src=\"if_$Id/$hashstr.$lcExt\" controls></video>" >> "$CacheDir/$File.video"
   done
@@ -578,14 +582,15 @@ remove_cached() {
   Section="${SECTIONS[$i]}"
   CacheDir="$CACHE/$Section"
   File=`basename "$filename"`
-  hashstr=`echo "$CacheDir/$File.d/$File"|hashsum 32`
-  log "Cache flushed: $File, hashstr:$hashstr"
 
-  # remove old cached files
-  rm -rf "$CacheDir/$File"*
+  # remove cached files
+  rm -rf "$CacheDir"
+  mkdir -p "$CacheDir"
+  # log "Cache flushed: $CacheDir"
 
-  # remove the broken links now:
-  find "$WEB/if_$i/" -type l ! -exec test -e {} \; -exec rm -f {} \;
+  # remove old website
+  rm -f "$WEB/if_$i/"*
+  # log "Webdir flushed: $WEB/if_$i"
   File=""
 }
 
@@ -607,6 +612,7 @@ handle_create() {
     Section="${SECTIONS[$i],,}"
     if [ "${directory}" = "$Section" ]; then
       log "File created/changed:  [$directory/$basefile]"
+      remove_cached
       generate_site
     fi
   done
@@ -633,27 +639,39 @@ handle_delete() {
   done
 }
 
-wakeup_with_dev() {
-  NETDEVS=`cat /proc/net/dev | grep -E '(eth|eno|ens)' | cut -d: -f1`
+wakeup_screens_etherwake() {
+  NETDEVS=`cat /proc/net/dev | grep "ens"| cut -d: -f1`
   for i in ${!MACS[@]}; do
     str=${MACS[$i]}
     str=${str#*|}
     mac=${str:0:17}
     for dev in ${NETDEVS[@]}; do
-      etherwake -i "$dev" "$mac" >/dev/null
-      etherwake -i "$dev" "$mac" >/dev/null
+      $ETHERWAKE -i "$dev" "$mac" >/dev/null
+      $ETHERWAKE -i "$dev" "$mac" >/dev/null
     done
   done
 }
 
-wakeup_simple() {
+wakeup_screens_wakeonlan() {
+  # wakeonlan [-h] [-v] [-i IP_address] [-p port] [-f file] [[hardware_address] ...]
   for i in ${!MACS[@]}; do
     # 3=1|12:34:56:78:90:ef|DSB Lehrerzimmer
     str=${MACS[$i]}
     str=${str#*|}
     mac=${str:0:17}
-    $WOL $mac >/dev/null
-    $WOL $mac >/dev/null
+    wakeonlan $mac >/dev/null
+    wakeonlan $mac >/dev/null
+  done
+}
+
+wakeup_screens_wol() {
+  for i in ${!MACS[@]}; do
+    # 3=1|12:34:56:78:90:ef|DSB Lehrerzimmer
+    str=${MACS[$i]}
+    str=${str#*|}
+    mac=${str:0:17}
+    wol $mac >/dev/null
+    wol $mac >/dev/null
   done
 }
 
@@ -669,30 +687,28 @@ wakeup_screens() {
     ln -s "$cl_layout.dsbd" "$SMB/Layout.dsbd"
   fi
 
-  # wol via etherwake (debian)
-  # etherwake [-i <ifname>] [-p aa:bb:cc:dd[:ee:ff]] 00:11:22:33:44:55
-  WOL=`which etherwake`
-  if [ ! -z $WOL ]; then
-    wakeup_with_dev
-    return
-  fi
-
   # wol via wakeonlan tool (ubuntu)
-  # wakeonlan [-h] [-v] [-i IP_address] [-p port] [-f file] [[hardware_address] ...]
   WOL=`which wakeonlan`
   if [ ! -z $WOL ]; then
-    wakeup_simple
+    wakeup_screens_wakeonlan
     return
   fi
 
   # wol via wol tool (arch linux)
   WOL=`which wol`
   if [ ! -z $WOL ]; then
-    wakeup_simple
+    wakeup_screens_wol
     return
   fi
 
-  log "WARNING: can not find wakeonlan tool like: wol, wakeonlan, etherwake ?!"
+  # wol via ether-wake (centos)
+  WOL=`which ether-wake`
+  if [ ! -z $WOL ]; then
+    wakeup_screens_etherwake
+    return
+  fi
+
+  log "WARNING: can not find wakeonlan tool like: wol, wakeonlan, ether-wake ?!"
 }
 
 # ON|YYYYmmdd|HHMM-HHMM|Layout|Beschreibung
