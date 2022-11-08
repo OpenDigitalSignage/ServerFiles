@@ -15,7 +15,7 @@ CACHE="$DSB_CACHE/$DSB_NAME.d"
 FIFO="$CACHE/$DSB_NAME.fifo"
 
 # version information
-DSB_VERSION="DSBD 0.24"
+DSB_VERSION="DSBD 0.25"
 
 # javascript files and templates
 LIBFILES="/var/lib/dsbd"
@@ -58,7 +58,7 @@ hashsum() {
 }
 
 random32() {
-  (cat; date "+%s-%N") | md5sum | cut -b1-32
+  date "+%s-%N" | md5sum | cut -b1-32
 }
 
 # called once in beginning
@@ -158,7 +158,7 @@ clean_fifo() {
 generate_img_list() {
   echo -n > "$CacheDir/$File.img"
   find "$CacheDir/$File.d" -name "*.png" | sort | while read f; do
-    hashstr=`echo $f|random32`
+    hashstr=`random32`
     ln -s -f "$f" "$WEB/if_$Id/$hashstr.png"
     echo "<img id=\"$hashstr\" src=\"if_$Id/$hashstr.png\" alt=\"\">" >> "$CacheDir/$File.img"
   done
@@ -167,13 +167,12 @@ generate_img_list() {
 # -> direct ins web (jpg, gif usw)
 conv_direct() {
   log "conv_direct -> $CacheDir/$File.img"
-  rm -rf "$CacheDir/$File.d"
   mkdir -p "$CacheDir/$File.d"
   ln -s "$CacheDir/$File" "$CacheDir/$File.d/$File"
   # <img> liste machen
   echo -n > "$CacheDir/$File.img"
   find "$CacheDir/$File.d" -iname "*.$lcExt" | sort | while read f; do
-    hashstr=`echo $f|random32`
+    hashstr=`random32`
     ln -s -f "$f" "$WEB/if_$Id/$hashstr.$lcExt"
     echo "<img id=\"$hashstr\" src=\"if_$Id/$hashstr.$lcExt\" alt=\"\">" >> "$CacheDir/$File.img"
   done
@@ -182,13 +181,12 @@ conv_direct() {
 # -> direct ins web, aber video tag
 conv_video() {
   log "conv_video -> $CacheDir/$File.video"
-  rm -rf "$CacheDir/$File.d"
   mkdir -p "$CacheDir/$File.d"
   ln -s "$CacheDir/$File" "$CacheDir/$File.d/$File"
   # <video> liste machen
   echo -n > "$CacheDir/$File.video"
   find "$CacheDir/$File.d" -iname "*.$lcExt" | sort | while read f; do
-    hashstr=`echo $f|random32`
+    hashstr=`random32`
     ln -s -f "$f" "$WEB/if_$Id/$hashstr.$lcExt"
     echo "<video id=\"$hashstr\" src=\"if_$Id/$hashstr.$lcExt\" controls></video>" >> "$CacheDir/$File.video"
   done
@@ -197,18 +195,16 @@ conv_video() {
 # convert image file via Image Magick comvert tool to png
 conv_images() {
   log "conv_image -> $CacheDir/$File.img"
-  rm -rf "$CacheDir/$File.d"
   mkdir -p "$CacheDir/$File.d"
-  convert "$CacheDir/$File" "$CacheDir/$File.d/$File.png"
+  convert "$CacheDir/$File" "$CacheDir/$File.d/$File.png" 2>/dev/null
   generate_img_list
 }
 
 # pdf, xps, cbz, and epub -> png
 conv_mutool() {
   log "conv_mutool -> $CacheDir/$File.img"
-  rm -rf "$CacheDir/$File.d"
   mkdir -p "$CacheDir/$File.d"
-  mutool draw $PDF_QUALITY -o "$CacheDir/$File.d/$File_%03d.png" "$CacheDir/$File"
+  mutool draw $PDF_QUALITY -o "$CacheDir/$File.d/$File_%03d.png" "$CacheDir/$File" 2>/dev/null
   generate_img_list
 }
 
@@ -216,18 +212,17 @@ conv_mutool() {
 # - wichtig, libreoffice einmal starten und pdf export qualität festlegen
 conv_office() {
   log "conv_office -> $CacheDir/$File.img"
-  rm -rf "$CacheDir/$File.d"
   mkdir -p "$CacheDir/$File.d"
   cp "$CacheDir/$File" "$CacheDir/$File.d"
   # man muß in das verzeichnis gehen...
   cd "$CacheDir/$File.d"
   # office nach pdf: (lala.doc -> lala.pdf)
-  unoconv -f pdf --pipe="pipe$$" "$File"
+  unoconv -f pdf --pipe="pipe$$" "$File" 2>/dev/null
   rm -f "$File"
   # pdf nach png:
   FileNoExt=${File%.*}
   log "conv_mutool -> $File_%03d.png $FileNoExt.pdf"
-  mutool draw $PDF_QUALITY -o "$File_%03d.png" "$FileNoExt.pdf"
+  mutool draw $PDF_QUALITY -o "$File_%03d.png" "$FileNoExt.pdf" 2>/dev/null
   rm -f "$FileNoExt.pdf"
   cd "$CACHE"
   generate_img_list
@@ -269,20 +264,16 @@ cache_file() {
 
 # Bilder und andere Mediendateien einlesen bzw. konvertieren
 read_mediafiles() {
-  # log "read_mediafiles id($Id)"
+  # log "Remove: cache=$CacheDir  web=$WEB/if_$Id"
+  rm -rf "$CacheDir"
+  rm -rf "$WEB/if_$Id"
   mkdir -p "$CacheDir" "$WEB/if_$Id"
 
   # für alle Dateien im SlideShow / Layout Ordner, die nicht *.txt sind:
   echo -n > "$CACHE/if_$Id.media"
   find "$UserDir" -maxdepth 1 -type f \! -iname "*.txt" | sort | while read F; do
     File=`basename "$F"`
-
-    # noch nicht im cache oder unterschiedliche größe
-    test ! -f "$CacheDir/$File" && cache_file
-    x1=`stat --printf "%s-%Y" "$UserDir/$File"`
-    x2=`stat --printf "%s-%Y" "$CacheDir/$File"`
-    # log "read_mediafiles x1=$x1 / x2=$x2"
-    test $x1 != "$x2" && cache_file
+    cache_file
 
     # .img bzw .video files wurden beim konvertieren erstellt
     test -f "$CacheDir/$File.img" && cat "$CacheDir/$File.img" >> "$CACHE/if_$Id.media"
@@ -536,7 +527,7 @@ generate_site() {
 
   # 5) cleanup
   rm -f "$CACHE/"iframe-*
-  cat "$WEB/"*.html | hashsum 20 > "$WEB/update.txt"
+  cat "$WEB/"*.html | hashsum > "$WEB/update.txt"
   date >> "$WEB/update.txt"
 }
 
@@ -577,23 +568,6 @@ remove_layout() {
   done
 }
 
-# $filename + $Section are set
-remove_cached() {
-  Section="${SECTIONS[$i]}"
-  CacheDir="$CACHE/$Section"
-  File=`basename "$filename"`
-
-  # remove cached files
-  rm -rf "$CacheDir"
-  mkdir -p "$CacheDir"
-  # log "Cache flushed: $CacheDir"
-
-  # remove old website
-  rm -f "$WEB/if_$i/"*
-  # log "Webdir flushed: $WEB/if_$i"
-  File=""
-}
-
 # file was created @ $SMB
 handle_create() {
   # log "handle_create file($basefile) dir($directory) orig($fullpath)"
@@ -612,7 +586,6 @@ handle_create() {
     Section="${SECTIONS[$i],,}"
     if [ "${directory}" = "$Section" ]; then
       log "File created/changed:  [$directory/$basefile]"
-      remove_cached
       generate_site
     fi
   done
@@ -633,14 +606,13 @@ handle_delete() {
     Section="${SECTIONS[$i],,}"
     if [ "${directory}" = "$Section" ]; then
       log "File deleted: [$directory/$basefile]"
-      remove_cached
       touch "$DSB_LAYOUT"
     fi
   done
 }
 
 wakeup_screens_etherwake() {
-  NETDEVS=`cat /proc/net/dev | grep "ens"| cut -d: -f1`
+  NETDEVS=`cat /proc/net/dev | -E '(eth|eno|ens)'| cut -d: -f1`
   for i in ${!MACS[@]}; do
     str=${MACS[$i]}
     str=${str#*|}
